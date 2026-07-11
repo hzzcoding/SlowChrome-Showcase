@@ -1,238 +1,339 @@
-# SlowChrome Showcase
+<div align="center">
 
-SlowChrome is a motorcycle customization prototype that turns a rider's bike photo into an AI-assisted future-build concept, with a production-style deployment and observability stack built around the application.
+# SlowChrome
 
-> Production source code is private. I keep this public repository as a recruiter- and interviewer-friendly showcase of the product, architecture, deployment model, and operational work. Source details are available for discussion during interviews.
+**AI-assisted motorcycle customization with a production-style DevOps and observability stack.**
+
+<p>
+  <img alt="Status" src="https://img.shields.io/badge/status-MVP%20on%20Azure-blue">
+  <img alt="Source" src="https://img.shields.io/badge/source-private-lightgrey">
+  <img alt="Frontend" src="https://img.shields.io/badge/frontend-Next.js%2014-black">
+  <img alt="Backend" src="https://img.shields.io/badge/backend-FastAPI-009688">
+  <img alt="Cloud" src="https://img.shields.io/badge/cloud-Azure%20VM-0078D4">
+  <img alt="Observability" src="https://img.shields.io/badge/observability-Prometheus%20%7C%20Grafana-orange">
+</p>
+
+<p>
+  <a href="#live-demo">Live Demo</a> |
+  <a href="#product-tour">Product Tour</a> |
+  <a href="#architecture">Architecture</a> |
+  <a href="#devops-and-sre-highlights">DevOps/SRE</a> |
+  <a href="#observability">Observability</a> |
+  <a href="#interview-talking-points">Interview Notes</a>
+</p>
+
+</div>
+
+---
+
+## What This Repository Is
+
+This is a **public portfolio showcase** for SlowChrome. It is designed for recruiters and interviewers who want to understand the product, architecture, deployment model, and operational work without exposing the private production source code.
+
+> Production source code is private. I can discuss architecture, implementation decisions, tradeoffs, and selected code during interviews.
+
+## 30-Second Scan
+
+| Signal | Evidence | Why it matters |
+| --- | --- | --- |
+| Full-stack product | Next.js frontend, FastAPI backend, OpenAI image route, Supabase cloud garage | Shows end-to-end product execution, not only UI work. |
+| AI workflow with guardrails | YOLOv8 motorcycle photo validation before image generation | Reduces poor inputs before calling an expensive AI operation. |
+| Cloud deployment | Docker Compose deployment on Azure VM | Demonstrates practical deployment beyond local development. |
+| CI/CD | GitHub Actions builds and deploys frontend/backend images | Shows repeatable release workflow. |
+| Observability | Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager | Shows SRE thinking: metrics, logs, traces, dashboards, alerts. |
+| Security boundaries | Internal backend port, server-only API keys, Supabase RLS | Shows attention to secrets, data ownership, and public surface area. |
 
 ## Live Demo
 
-- **Current status:** hosted on an Azure Virtual Machine for MVP testing.
-- **Public URL:** to be updated after the custom domain and HTTPS setup are finalized.
-- **Known deployment gap:** the Azure-hosted version still has an authentication redirect issue that will be resolved together with the domain/DNS work.
+| Item | Status |
+| --- | --- |
+| Azure VM deployment | Running for MVP testing |
+| Public URL | Coming after custom domain and HTTPS setup |
+| Authentication on deployed site | Known redirect issue; planned to resolve with domain/DNS configuration |
+| Source code | Private; available for interview discussion |
 
-## Two-Minute Product Tour
+## Product Tour
 
-A short demo video will be added here after the domain is finalized.
+A two-minute video will be added after the domain and HTTPS work is complete.
 
-Suggested tour flow:
+| Tour moment | What it demonstrates |
+| --- | --- |
+| Mobile-first product flow | A rider starts a guided customization session. |
+| Bike photo upload | The app collects the motorcycle reference image. |
+| YOLO validation | FastAPI checks whether the image is usable before generation. |
+| Future-build render | The server-side route calls OpenAI image generation without exposing the API key. |
+| Cloud garage | Supabase-backed saved builds persist per user when authentication is configured. |
+| Grafana walkthrough | Metrics, logs, traces, and alerts are visible from the operations stack. |
 
-1. Open SlowChrome on mobile.
-2. Upload a motorcycle photo.
-3. Validate the image through the FastAPI/YOLO backend.
-4. Generate a future-build concept.
-5. Save the build to the cloud garage when authentication is enabled.
-6. Show the Grafana dashboards for backend health, infrastructure saturation, logs, traces, and alerts.
+## Proof Gallery
 
-## Product Summary
-
-SlowChrome explores a focused customization workflow for Harley-style motorcycle owners:
-
-- **Guided bike upload:** riders provide a photo of their motorcycle.
-- **Image validation:** a backend detector checks whether the photo is usable before running the AI flow.
-- **Style guidance:** the UI helps users explore build styles, parts, and visual direction.
-- **AI future-build render:** a server-side route calls OpenAI image generation while keeping the API key off the client.
-- **Cloud garage:** Supabase authentication, database rows, Row Level Security, and private storage support account-backed saved builds.
-- **Operational stack:** Docker, CI/CD, health checks, metrics, logs, traces, dashboards, alerts, and VM deployment are treated as first-class parts of the project.
+| Asset | Status | Notes |
+| --- | --- | --- |
+| `assets/architecture.png` | Planned | Polished export of the architecture diagram below. |
+| `assets/dashboard.png` | Planned | Grafana dashboard screenshot with IPs, emails, and hostnames redacted. |
+| `assets/alerts.png` | Planned | Alerting overview screenshot with private values removed. |
+| `assets/ci-cd.png` | Planned | GitHub Actions pipeline screenshot with secret values hidden. |
+| `demo/demo-video.mp4` or video link | Planned | Short product and operations walkthrough. |
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    U[Mobile user] --> FE[Next.js 14 frontend]
-    FE --> NX[Next.js API routes]
-    NX --> BE[FastAPI backend]
-    BE --> YOLO[YOLOv8 motorcycle photo validation]
-    NX --> OAI[OpenAI image generation API]
-    FE --> SB[Supabase Auth, Database, Storage]
+    user["Mobile rider"] --> frontend["Next.js 14 app"]
+    frontend --> api["Next.js API routes"]
+    api --> backend["FastAPI service"]
+    backend --> detector["YOLOv8 photo validation"]
+    api --> openai["OpenAI image generation"]
+    frontend --> supabase["Supabase Auth, Postgres, Storage"]
 
-    subgraph Azure VM
-        FE
-        NX
-        BE
-        PROM[Prometheus]
-        GRAF[Grafana]
-        LOKI[Loki]
-        ALLOY[Grafana Alloy]
-        TEMPO[Tempo]
-        OTEL[OpenTelemetry Collector]
-        AM[Alertmanager]
-        NODE[node-exporter]
-        CAD[cAdvisor]
+    subgraph azure["Azure VM"]
+        frontend
+        api
+        backend
+        prometheus["Prometheus"]
+        grafana["Grafana"]
+        loki["Loki"]
+        alloy["Grafana Alloy"]
+        tempo["Tempo"]
+        otel["OpenTelemetry Collector"]
+        alertmanager["Alertmanager"]
+        node["node-exporter"]
+        cadvisor["cAdvisor"]
     end
 
-    BE --> MET[/health and /metrics]
-    PROM --> MET
-    PROM --> NODE
-    PROM --> CAD
-    BE --> OTEL --> TEMPO
-    ALLOY --> LOKI
-    PROM --> AM
-    GRAF --> PROM
-    GRAF --> LOKI
-    GRAF --> TEMPO
-    GRAF --> AM
+    backend --> health["/health"]
+    backend --> metrics["/metrics"]
+    prometheus --> metrics
+    prometheus --> node
+    prometheus --> cadvisor
+    backend --> otel
+    otel --> tempo
+    alloy --> loki
+    prometheus --> alertmanager
+    grafana --> prometheus
+    grafana --> loki
+    grafana --> tempo
+    grafana --> alertmanager
 ```
 
-## Deployment Model
+## Product Workflow
+
+```mermaid
+sequenceDiagram
+    participant U as Rider
+    participant F as Next.js frontend
+    participant N as Next.js API route
+    participant B as FastAPI backend
+    participant Y as YOLOv8 detector
+    participant O as OpenAI image API
+    participant S as Supabase
+
+    U->>F: Upload motorcycle photo
+    F->>N: POST /api/validate-bike-photo
+    N->>B: Forward inside Docker network
+    B->>Y: Detect and classify photo usability
+    Y-->>B: Approved, warning, or rejected
+    B-->>N: Validation result
+    N-->>F: Display guidance
+    U->>F: Request future-build render
+    F->>N: POST /api/generate-build-image
+    N->>O: Server-side image generation request
+    O-->>N: Rendered concept
+    F->>S: Save build and image when signed in
+```
+
+## DevOps and SRE Highlights
+
+| Area | Implementation |
+| --- | --- |
+| Containerization | Separate frontend and backend Docker images. |
+| Runtime topology | Browser talks to the frontend; FastAPI stays internal on Docker networking. |
+| Health checks | Backend exposes `/health`; Compose waits for backend health before dependent services start. |
+| CI/CD | GitHub Actions builds frontend/backend images, pushes Docker Hub tags, and deploys to Azure VM. |
+| Config boundaries | Public browser values are separated from server-only secrets such as OpenAI credentials. |
+| Cloud persistence | Supabase Auth, user-owned database rows, private image storage, and Row Level Security. |
+| Monitoring | Prometheus metrics, Grafana dashboards, node-exporter, cAdvisor. |
+| Logs | Loki and Grafana Alloy collect frontend/backend container logs. |
+| Traces | OpenTelemetry instrumentation sends FastAPI traces through Collector to Tempo. |
+| Alerts | Prometheus alert rules route to Alertmanager with email notification configuration. |
+
+## Deployment Flow
 
 ```mermaid
 flowchart LR
-    DEV[Local development] --> GH[GitHub main branch]
-    GH --> ACT[GitHub Actions]
-    ACT --> FB[Build frontend Docker image]
-    ACT --> BB[Build backend Docker image]
-    FB --> DH[Docker Hub]
-    BB --> DH
-    ACT --> VM[Azure VM deploy job]
-    VM --> PULL[docker compose pull]
-    PULL --> UP[docker compose up]
-    UP --> PROD[SlowChrome MVP deployment]
+    push["Push to main"] --> actions["GitHub Actions"]
+    actions --> frontendImage["Build frontend image"]
+    actions --> backendImage["Build backend image"]
+    frontendImage --> dockerHub["Docker Hub"]
+    backendImage --> dockerHub
+    actions --> sync["Sync Compose and monitoring files"]
+    sync --> vm["Azure VM"]
+    vm --> pull["docker compose pull"]
+    pull --> up["docker compose up"]
+    up --> app["MVP deployment"]
 ```
-
-## SRE and DevOps Highlights
-
-| Area | What was implemented |
-| --- | --- |
-| Containerization | Separate Docker images for the Next.js frontend and FastAPI backend. |
-| Service boundaries | Browser traffic goes through the frontend; backend port `8000` stays internal to the Docker network. |
-| Health checks | FastAPI exposes `/health`; production Compose uses backend health checks before starting dependent services. |
-| CI/CD | Pushes to `main` build frontend/backend Docker images, push tags to Docker Hub, and deploy to the Azure VM. |
-| Runtime configuration | Environment variables separate public browser config from server-only keys such as `OPENAI_API_KEY`. |
-| Cloud deployment | Azure Ubuntu VM runs Docker Compose for the app and monitoring stack. |
-| Auth and data security | Supabase Auth, user-owned tables, Row Level Security, and private image storage are designed into the cloud-save flow. |
-| Observability | Metrics, dashboards, logs, traces, and alerts are provisioned with infrastructure-as-code style configuration. |
-| Alerting | Prometheus alert rules feed Alertmanager, with email notification configuration managed through secrets. |
-| Operational access | Monitoring services bind to localhost and are accessed through SSH tunnels instead of being exposed publicly. |
-
-## Observability Stack
-
-SlowChrome includes a five-phase observability setup:
-
-1. **Backend golden signals:** FastAPI Prometheus metrics, Prometheus scraping, and Grafana dashboard provisioning.
-2. **Infrastructure saturation:** node-exporter for VM CPU/memory/disk/network and cAdvisor for Docker container saturation.
-3. **Container logs:** Loki and Grafana Alloy collect logs from SlowChrome containers.
-4. **Distributed tracing:** OpenTelemetry instrumentation sends FastAPI traces through the OpenTelemetry Collector to Tempo.
-5. **Alerting:** Prometheus rules, Alertmanager routing, and a Grafana alerting overview dashboard.
-
-Dashboards created for the project:
-
-- SlowChrome Backend Golden Signals
-- SlowChrome Infrastructure Saturation
-- SlowChrome Container Logs
-- SlowChrome Alerting Overview
-
-## CI/CD Pipeline
-
-The deployment pipeline is designed around reproducible images and a small VM runtime:
-
-1. Checkout repository.
-2. Build frontend image from `Dockerfile.frontend`.
-3. Build backend image from `backend/Dockerfile`.
-4. Push `latest` and commit-SHA image tags to Docker Hub.
-5. Sync Docker Compose and monitoring configuration to the Azure VM.
-6. Start or update the app stack with Docker Compose.
-7. Run the app behind the VM's public frontend port during MVP testing.
 
 Planned hardening:
 
-- Use immutable commit-SHA tags in production deployment instead of `latest`.
+- Deploy immutable commit-SHA tags instead of `latest`.
 - Add post-deploy smoke tests.
 - Document rollback to the previous known-good image.
-- Move from raw VM port access to domain + HTTPS reverse proxy.
+- Move public traffic from raw VM port access to domain + HTTPS reverse proxy.
 
-## Monitoring and Alerting
+## Observability
 
-Initial alert rules cover backend availability and operational health. The monitoring stack tracks:
+SlowChrome uses a phased observability stack:
 
+| Phase | Scope | Tools |
+| --- | --- | --- |
+| 1 | Backend golden signals | FastAPI metrics, Prometheus, Grafana |
+| 2 | VM and container saturation | node-exporter, cAdvisor |
+| 3 | Container logs | Loki, Grafana Alloy |
+| 4 | Distributed tracing | OpenTelemetry, Collector, Tempo |
+| 5 | Alerting | Prometheus rules, Alertmanager, Grafana alerting overview |
+
+Dashboard coverage:
+
+- Backend traffic by route
+- Backend 5xx rate
+- Backend p95 latency
 - Backend scrape health
-- HTTP traffic by route
-- 5xx error rate
-- p95 latency
 - VM CPU, memory, disk, and network utilization
-- Container CPU and memory usage
-- Container restarts
+- Container CPU, memory, and restart signals
 - Frontend and backend logs
-- OpenTelemetry traces for backend routes
+- Backend traces for routes such as `/health`, `/metrics`, and photo validation
 - Firing and pending alerts by severity
+
+Operational note: monitoring services bind to localhost and are accessed through SSH tunnels instead of being exposed to the public internet.
+
+## Security and Data Boundaries
+
+| Boundary | Design choice |
+| --- | --- |
+| Backend exposure | FastAPI is reached through the frontend proxy and Docker network, not directly by the browser. |
+| AI credentials | OpenAI API key stays server-side. |
+| Supabase keys | Browser receives only public anonymous configuration. |
+| User data | Builds and garage state are user-owned through Row Level Security policies. |
+| Image storage | Private storage bucket with per-user path policies. |
+| Operations access | Grafana, Prometheus, Loki, Tempo, and Alertmanager are intended for tunnelled access. |
+| Public showcase | This repository excludes source code, `.env` files, private logs, tokens, and unredacted screenshots. |
 
 ## Troubleshooting Stories
 
-### Keeping the backend private while preserving browser uploads
+### Backend uploads without a public backend
 
-The upload flow initially needed browser access to image validation, but exposing the FastAPI backend directly would have widened the public surface area. The current architecture routes the browser to a Next.js API endpoint, then proxies the request to `http://backend:8000` inside the Docker network. This keeps backend port `8000` internal while preserving a simple frontend integration.
+The browser needs to validate uploaded bike photos, but exposing FastAPI directly would create a wider public surface area. The current design sends browser traffic to a Next.js API route, then proxies to `http://backend:8000` inside Docker. The user flow stays simple while the backend port remains internal.
 
-### Designing cloud saves without weakening privacy
+### Account-backed saves without cross-user data access
 
-The cloud garage uses Supabase Auth plus user-owned database rows and private storage. Row Level Security policies restrict reads and writes by authenticated user, and browser configuration only receives the public anonymous key. Service-role keys and OpenAI credentials stay server-side.
+Cloud saves use Supabase Auth with user-owned tables, private storage, and Row Level Security. The design goal is that signed-in users can retrieve their own builds while database and storage policies prevent access to another user's saved images.
 
-### Making observability useful on a single VM
+### Single-VM observability without public dashboards
 
-Instead of exposing Grafana, Prometheus, Loki, Tempo, or Alertmanager publicly, monitoring services bind to `127.0.0.1` and are accessed with SSH tunnels. That keeps the MVP operationally inspectable without turning internal dashboards into public endpoints.
+For the MVP, the monitoring stack runs on the same VM as the app. Grafana, Prometheus, Loki, Tempo, and Alertmanager bind locally and are inspected through SSH tunnels. This keeps the system debuggable without publishing internal operations tools.
+
+## Current Status
+
+| Area | Status |
+| --- | --- |
+| Local app flow | Working for MVP development |
+| Azure VM hosting | Working for MVP testing |
+| Dockerized frontend/backend | Implemented |
+| GitHub Actions deployment | Implemented |
+| Supabase auth and cloud save code | Implemented |
+| Deployed auth redirect | Needs domain/DNS follow-up |
+| HTTPS/domain | Planned |
+| Production smoke tests | Planned |
+| Public demo assets | Planned |
 
 ## Tech Stack
 
 ### Application
 
-- Next.js 14 App Router
-- React 18
-- TypeScript
-- Tailwind CSS
-- FastAPI
+<p>
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-14-black?logo=nextdotjs">
+  <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white">
+  <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-CSS-06B6D4?logo=tailwindcss&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-image%20generation-412991?logo=openai&logoColor=white">
+  <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Auth%20%7C%20DB%20%7C%20Storage-3FCF8E?logo=supabase&logoColor=black">
+</p>
+
 - YOLOv8 / Ultralytics
 - OpenCV / Pillow
-- OpenAI image generation
 - Supabase Auth, Postgres, Storage, and Row Level Security
 
 ### Infrastructure and Operations
 
-- Docker and Docker Compose
-- GitHub Actions
+<p>
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white">
+  <img alt="GitHub Actions" src="https://img.shields.io/badge/GitHub%20Actions-CI%2FCD-2088FF?logo=githubactions&logoColor=white">
+  <img alt="Azure" src="https://img.shields.io/badge/Azure-VM-0078D4?logo=microsoftazure&logoColor=white">
+  <img alt="Prometheus" src="https://img.shields.io/badge/Prometheus-metrics-E6522C?logo=prometheus&logoColor=white">
+  <img alt="Grafana" src="https://img.shields.io/badge/Grafana-dashboards-F46800?logo=grafana&logoColor=white">
+  <img alt="Loki" src="https://img.shields.io/badge/Loki-logs-F46800?logo=grafana&logoColor=white">
+  <img alt="OpenTelemetry" src="https://img.shields.io/badge/OpenTelemetry-traces-000000?logo=opentelemetry&logoColor=white">
+</p>
+
 - Docker Hub
-- Azure Virtual Machine
-- Prometheus
-- Grafana
+- Tempo
+- Grafana Alloy
+- Alertmanager
 - node-exporter
 - cAdvisor
-- Loki
-- Grafana Alloy
-- Tempo
-- OpenTelemetry Collector
-- Alertmanager
 
-## Repository Boundary
+## Roadmap
 
-This public repository intentionally excludes:
+Near-term production hardening:
 
-- Application source code
-- Environment files
-- API keys or service-role keys
-- Private database connection details
-- Proprietary implementation details
-- User data or generated private images
+- [ ] Purchase and configure the production domain.
+- [ ] Add HTTPS with Caddy or Nginx.
+- [ ] Update Supabase redirect allowlists for the production domain.
+- [ ] Remove public access to raw port `3000`.
+- [ ] Verify login, cloud saves, and image generation end to end on the production domain.
+- [ ] Add post-deploy smoke tests and rollback notes.
 
-It includes only:
+Portfolio enhancements:
+
+- [ ] Add a two-minute product video.
+- [ ] Add redacted Grafana dashboard screenshots.
+- [ ] Add a polished architecture image.
+- [ ] Add a short runbook or incident example.
+- [ ] Add product screenshots or GIFs.
+
+## Interview Talking Points
+
+- How to keep a backend private while still supporting browser uploads.
+- How to structure an AI workflow so validation happens before an expensive generation call.
+- How Supabase Row Level Security changes the data model for user-owned builds.
+- How to make a single-VM MVP observable without exposing operations dashboards.
+- How to evolve the current deployment from raw VM port access to domain, HTTPS, reverse proxy, smoke tests, and rollback.
+- What should move from prototype allowances to server-side entitlement enforcement before a paid launch.
+
+## Public Repository Boundary
+
+This repository intentionally contains only showcase material:
 
 - Product and architecture summary
 - Deployment and operations summary
 - Diagrams and demo placeholders
 - Interview-friendly technical highlights
 
-## Roadmap
+It intentionally excludes:
 
-Near-term production hardening:
+- Application source code
+- `.env` files
+- API keys or service-role keys
+- Private database connection details
+- Private logs
+- User data or generated private images
+- Unredacted provider dashboards
 
-- Buy and configure the production domain.
-- Add HTTPS through Caddy or Nginx.
-- Update Supabase redirect allowlists for the production domain.
-- Close public access to raw port `3000`.
-- Verify login, cloud saves, and image generation end to end on the production domain.
-- Add post-deploy smoke tests and rollback documentation.
+## README Inspiration
 
-Portfolio enhancements:
+This showcase format was informed by public README patterns from:
 
-- Add a two-minute product demo video.
-- Add dashboard screenshots with sensitive values redacted.
-- Add a concise incident/runbook example.
-- Add before/after product screenshots.
-- Replace Mermaid diagrams with polished exported architecture images if needed.
+- [Best-README-Template](https://github.com/othneildrew/Best-README-Template)
+- [awesome-readme](https://github.com/matiassingers/awesome-readme)
 
