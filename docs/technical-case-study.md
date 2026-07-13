@@ -223,68 +223,28 @@ The screenshots below were captured from the SlowChrome Grafana instance through
 | Operations access | Grafana, Prometheus, Loki, Tempo, and Alertmanager are intended for tunnelled access. |
 | Public showcase | This repository excludes source code, `.env` files, private logs, tokens, and unredacted screenshots. |
 
-## Troubleshooting Stories
+## Engineering Tradeoffs
 
-### Backend uploads without a public backend
-
-The browser needs to validate uploaded bike photos, but exposing FastAPI directly would create a wider public surface area. The current design sends browser traffic to a Next.js API route, then proxies to `http://backend:8000` inside Docker. The user flow stays simple while the backend port remains internal.
-
-### Release traceability without a heavy platform
-
-The app still runs on a single Azure VM, so the deployment process records a small runtime state file for the current and previous release. This gives the rollback workflow a concrete target without introducing a larger release-management system.
-
-### Single-VM observability without public dashboards
-
-For the MVP, the monitoring stack runs on the same VM as the app. Grafana, Prometheus, Loki, Tempo, and Alertmanager bind locally and are inspected through SSH tunnels. This keeps the system debuggable without publishing internal operations tools.
-
-### Visual QA in CI
-
-The deploy gate includes a Playwright homepage sanity check that waits for the production build to serve locally, verifies key hero text, checks page dimensions, and uploads a homepage screenshot artifact. This catches blank or badly framed homepage regressions before Docker images are deployed.
-
-## Current Status
-
-| Area | Status |
+| Decision | Why it matters |
 | --- | --- |
-| Public HTTPS domain | Implemented at `https://theslowchrome.com` |
-| Reverse proxy and private app ports | Implemented for the current VM deployment |
-| Dockerized frontend/backend | Implemented |
-| GitHub Actions test/build gate | Implemented |
-| SHA-tag Docker image deployment | Implemented |
-| Post-deploy smoke test | Implemented |
-| Deployment state recording | Implemented |
-| Manual rollback workflow | Implemented |
-| Core runbooks and ops/release logs | Implemented |
-| Supabase auth and cloud save code | Implemented |
-| Full deployed login/cloud-save/image-generation verification | Still needs end-to-end production verification |
-| TLS renewal documentation, SSH hardening, VM firewall, security headers | Remaining production hardening follow-ups |
+| Keep FastAPI private behind a Next.js API proxy | Browser uploads can reach the validation workflow without exposing the backend as a public internet service. |
+| Use short-SHA image tags instead of `latest` | Each deploy maps back to a specific commit, which makes smoke tests, rollback, and incident review concrete. |
+| Run monitoring on the same VM, accessed by SSH tunnel | The MVP stays inexpensive and debuggable while keeping Grafana, Prometheus, Loki, Tempo, and Alertmanager off the public internet. |
+| Add Playwright visual sanity to the deploy gate | A lightweight homepage screenshot check catches blank-page and major layout regressions before images are promoted. |
 
-## Roadmap
+## Production Readiness
 
-Near-term production hardening:
+| Area | State |
+| --- | --- |
+| Public web entry | Live at `https://theslowchrome.com` behind HTTPS reverse proxy. |
+| App deployment | Frontend/backend are Dockerized and deployed with immutable short-SHA image tags. |
+| CI/CD safety | GitHub Actions runs build/test gates, visual sanity, deploy, post-deploy smoke checks, and deployment-state recording. |
+| Recovery | Manual rollback workflow can restore the previous deployment state or an explicit image tag. |
+| Observability | Grafana dashboards cover backend golden signals, VM/container saturation, logs, traces, alerts, and deployment identity. |
+| Remaining production hardening | End-to-end login/cloud-save/image-generation verification, TLS renewal drill, SSH/firewall tightening, and baseline security headers. |
 
-- [ ] Document and test automatic TLS renewal.
-- [ ] Verify HTTP-to-HTTPS redirect behavior.
-- [ ] Restrict SSH and enable VM firewall where practical.
-- [ ] Add baseline security response headers.
-- [ ] Verify login, cloud saves, and image generation end to end on the production domain.
-- [ ] Run the first real rollback drill after two SHA-tagged deploys exist.
-- [ ] Complete backup/restore drill documentation.
+## Next Improvements
 
-Portfolio enhancements:
-
-- [ ] Add a two-minute product video.
-- [x] Add redacted Grafana screenshots.
-- [ ] Add GitHub Actions screenshots.
-- [ ] Add a polished architecture image.
-- [ ] Add a short incident or rollback drill write-up.
-- [ ] Add product screenshots or GIFs from the latest mobile homepage and explore feed.
-
-## Interview Talking Points
-
-- How to keep FastAPI private while supporting browser uploads through a Next.js proxy.
-- Why YOLO validation runs before OpenAI image generation.
-- How Supabase Row Level Security shapes account-owned build storage.
-- How the project moved from raw VM port access to a domain, HTTPS reverse proxy, and private container ports.
-- Why immutable image tags, smoke tests, and deployment identity metrics matter for rollback.
-- How to make a single-VM MVP observable without exposing operations dashboards.
-- What should move from prototype/local allowances to server-side entitlement enforcement before a paid launch.
+- Verify the full signed-in production flow on the final domain: login, cloud saves, and image generation.
+- Run and document the first rollback drill after multiple SHA-tagged deploys exist.
+- Add GitHub Actions screenshots and a short product walkthrough video to the showcase.

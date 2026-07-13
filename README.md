@@ -72,7 +72,7 @@ SlowChrome includes Grafana dashboards for backend golden signals, VM/container 
 
 ## Technical Deep Dive
 
-For architecture diagrams, deployment flow, observability details, security boundaries, troubleshooting stories, and engineering tradeoffs, see the [Technical Case Study](docs/technical-case-study.md).
+For architecture diagrams, deployment flow, observability details, security boundaries, and engineering tradeoffs, see the [Technical Case Study](docs/technical-case-study.md).
 
 ## Repository Boundary
 
