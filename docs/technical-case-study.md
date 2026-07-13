@@ -182,6 +182,33 @@ Dashboard and signal coverage includes:
 
 Operational note: monitoring services bind to localhost and are accessed through SSH tunnels instead of being exposed to the public internet.
 
+## Observability Evidence
+
+The screenshots below were captured from the SlowChrome Grafana instance through a local SSH tunnel on July 12, 2026. They are static, portfolio-safe evidence of the monitoring stack; the live operations dashboards remain private.
+
+| Dashboard | What it demonstrates |
+| --- | --- |
+| Backend Golden Signals | Traffic, error-rate panel, p95 latency, and FastAPI scrape health. |
+| Infrastructure Saturation | VM CPU, memory, disk, network, exporter health, and deployment identity panels. |
+| Container Logs | Loki-backed container log search through Grafana. |
+| Alerting Overview | Prometheus/Grafana alert visibility for firing and pending alert states. |
+
+### Backend Golden Signals
+
+![SlowChrome Backend Golden Signals Grafana dashboard](../assets/grafana-backend-golden-signals.png)
+
+### Infrastructure Saturation
+
+![SlowChrome Infrastructure Saturation Grafana dashboard](../assets/grafana-infrastructure-saturation.png)
+
+### Container Logs
+
+![SlowChrome Container Logs Grafana dashboard](../assets/grafana-container-logs.png)
+
+### Alerting Overview
+
+![SlowChrome Alerting Overview Grafana dashboard](../assets/grafana-alerting-overview.png)
+
 ## Security and Data Boundaries
 
 | Boundary | Design choice |
@@ -246,7 +273,8 @@ Near-term production hardening:
 Portfolio enhancements:
 
 - [ ] Add a two-minute product video.
-- [ ] Add redacted Grafana and GitHub Actions screenshots.
+- [x] Add redacted Grafana screenshots.
+- [ ] Add GitHub Actions screenshots.
 - [ ] Add a polished architecture image.
 - [ ] Add a short incident or rollback drill write-up.
 - [ ] Add product screenshots or GIFs from the latest mobile homepage and explore feed.
@@ -260,4 +288,3 @@ Portfolio enhancements:
 - Why immutable image tags, smoke tests, and deployment identity metrics matter for rollback.
 - How to make a single-VM MVP observable without exposing operations dashboards.
 - What should move from prototype/local allowances to server-side entitlement enforcement before a paid launch.
-

@@ -16,6 +16,7 @@
   <a href="#what-i-built">What I Built</a> |
   <a href="#project-highlights">Highlights</a> |
   <a href="#live-demo-and-media">Demo</a> |
+  <a href="#observability-preview">Observability</a> |
   <a href="#tech-stack">Tech Stack</a> |
   <a href="docs/technical-case-study.md">Technical Case Study</a>
 </p>
@@ -59,6 +60,12 @@ SlowChrome is more than an AI image generator. The product direction includes:
 
 Product screenshots and a short walkthrough video are planned as public showcase assets after the next visual QA pass.
 
+## Observability Preview
+
+![SlowChrome Grafana observability preview](assets/grafana-observability-preview.png)
+
+SlowChrome includes Grafana dashboards for backend golden signals, VM/container saturation, logs, traces, alerting, and deployment identity. More screenshots and architecture context are available in the [Technical Case Study](docs/technical-case-study.md#observability-evidence).
+
 ## Tech Stack
 
 **Tech Stack:** Next.js, React, TypeScript, Tailwind CSS | FastAPI, YOLOv8, OpenAI Images | Supabase Auth/Storage | Docker, GitHub Actions, Azure VM, HTTPS reverse proxy | Playwright, Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager.
@@ -70,4 +77,3 @@ For architecture diagrams, deployment flow, observability details, security boun
 ## Repository Boundary
 
 This public repository intentionally excludes application source code, environment files, API keys, private logs, user data, and unredacted provider screenshots. It includes only portfolio-safe project summary material.
-
