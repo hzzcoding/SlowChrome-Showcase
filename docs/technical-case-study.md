@@ -1,27 +1,29 @@
-# SlowChrome Technical Case Study
+# SlowChrome SRE / DevOps Technical Case Study
 
-This document is the deeper engineering companion to the recruiter-friendly [README](../README.md). It explains the architecture, production deployment model, observability stack, recovery workflow, security boundaries, and tradeoffs behind SlowChrome.
+This document is the deeper engineering companion to the recruiter-friendly [README](../README.md). It focuses on the operational layer around SlowChrome: HTTPS entry, containerized services, CI/CD, observability, rollback readiness, security boundaries, and production tradeoffs.
 
 ## System Overview
 
-SlowChrome is an AI-powered motorcycle customization platform. The current MVP combines a mobile-first style flow, motorcycle photo validation, server-side AI image generation, personalized parts direction, cloud-backed saved builds, a manually curated explore feed, and production-style deployment/recovery controls.
+SlowChrome is the application being operated. This case study focuses on the production-style system around it: public HTTPS traffic enters through a reverse proxy, app services run as containers on an Azure VM, backend ports stay private, and the monitoring plane is accessed through SSH tunnels instead of public dashboards.
 
 ```mermaid
 flowchart TD
-    user["Rider / visitor"] --> domain["theslowchrome.com"]
+    user["User"] --> domain["theslowchrome.com"]
     domain --> proxy["HTTPS reverse proxy :443"]
-    proxy --> frontend["Next.js frontend :3000"]
+    proxy --> frontend["Next.js app container :3000"]
     frontend --> api["Next.js API routes"]
-    api --> backend["FastAPI backend :8000"]
+    api --> backend["FastAPI backend container :8000"]
     backend --> detector["YOLOv8 photo validation"]
     api --> openai["OpenAI Images API"]
     frontend --> supabase["Supabase Auth, Postgres, Storage"]
+    smoke["Post-deploy smoke tests"] --> domain
 
     subgraph vm["Azure Ubuntu VM"]
         proxy
         frontend
         api
         backend
+        logs["Container stdout logs"]
         prometheus["Prometheus"]
         grafana["Grafana"]
         loki["Loki"]
@@ -34,10 +36,15 @@ flowchart TD
     end
 
     backend --> health["/health"]
-    backend --> metrics["/metrics and deployment identity"]
+    backend --> metrics["/metrics + deployment identity"]
+    smoke --> health
+    smoke --> metrics
+    frontend --> logs
+    backend --> logs
     prometheus --> metrics
     prometheus --> node
     prometheus --> cadvisor
+    logs --> alloy
     backend --> otel
     otel --> tempo
     alloy --> loki
@@ -48,58 +55,52 @@ flowchart TD
     grafana --> alertmanager
 ```
 
-## Product Workflow
+## Runtime Request Path
+
+The main AI workflow is useful as an SRE view because it shows the public/private network boundary, where server-side credentials are used, and where app telemetry is produced.
 
 ```mermaid
 sequenceDiagram
-    participant U as Rider
+    participant U as User
     participant F as Next.js frontend
     participant N as Next.js API route
     participant B as FastAPI backend
     participant Y as YOLOv8 detector
     participant O as OpenAI Images API
     participant S as Supabase
+    participant M as Observability stack
 
-    U->>F: Answer style and bike questions
+    U->>F: Open app and start AI workflow
     U->>F: Upload motorcycle photo
     F->>N: POST /api/validate-bike-photo
     N->>B: Forward inside Docker network
     B->>Y: Detect and classify photo usability
     Y-->>B: Approved, warning, or rejected
+    B-->>M: Emit metrics, logs, and traces
     B-->>N: Validation result
     N-->>F: Display guidance
     U->>F: Request future-build render
     F->>N: POST /api/generate-build-image
     N->>O: Server-side image generation request
     O-->>N: Rendered concept
-    F->>S: Save build and image when signed in
-    F-->>U: Show parts direction, saved build, news, and local events
+    N-->>F: Return generated image
+    N-->>M: Emit request and deployment signals
+    F->>S: Save build and image for signed-in users
+    F-->>U: Show generated build result
 ```
 
-## Product Surface
-
-| Area | Current implementation |
-| --- | --- |
-| Homepage | Rebuilt around the core loop: taste answers, AI bike preview, style references, parts drops, news, and local culture. |
-| AI style flow | Mobile-first flow for profile selection, style consultation, bike upload, validation, and AI build result. |
-| Parts discovery | Curated product direction and representative parts tied to the generated build and user style direction. |
-| Cloud garage | Supabase-backed saved builds and garage state with local fallback when cloud config is unavailable. |
-| Explore feed | Hand-curated biweekly feed with motorcycle customization news, reference stories, and Vancouver local events calendar. |
-| News detail pages | Static news detail routes for feed articles with images and editorial copy. |
-
-## Engineering Highlights
+## Operational Highlights
 
 | Area | Implementation |
 | --- | --- |
-| Frontend | Next.js 14 App Router, React, TypeScript, Tailwind CSS, mobile-first custom motorcycle visual system. |
-| Backend | FastAPI service validates uploaded motorcycle photos before the AI image workflow runs. |
-| AI workflow | YOLOv8 gates photo quality before server-side OpenAI image generation; OpenAI key stays server-side. |
-| Cloud data | Supabase Auth, Postgres, Storage, and Row Level Security support account-owned saved builds and private images. |
-| Production entry | `https://theslowchrome.com` routes through a VM reverse proxy to an internal frontend port. |
-| Network perimeter | Public web traffic is intended for `80`/`443`; frontend `3000` and backend `8000` are not public entry points. |
-| CI/CD | GitHub Actions runs tests, production build, homepage visual sanity, backend tests, deployment tests, Docker build/push, deploy, smoke test, and deployment-state recording. |
-| Recovery | Manual rollback workflow can restore the previous deployment state or an explicit image tag, then smoke-test and record the rollback. |
+| Public entry | `https://theslowchrome.com` routes through an HTTPS reverse proxy to the internal app container. |
+| Containerized services | Next.js and FastAPI run as separate Docker services with clear app/backend boundaries. |
+| Private backend network | Browser traffic reaches FastAPI through a Next.js API route; the backend is not a public entry point. |
+| CI/CD | GitHub Actions runs build/test gates, visual sanity checks, backend/deploy tests, Docker build/push, deploy, smoke test, and deployment-state recording. |
+| Immutable releases | Production deploys use commit-derived short-SHA image tags instead of mutable `latest` tags. |
+| Recovery | Manual rollback can restore the previous deployment state or an explicit image tag, then smoke-test and record the result. |
 | Observability | Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager, node-exporter, and cAdvisor provide app, deployment, and infrastructure visibility. |
+| Security boundaries | AI credentials stay server-side; Supabase Auth/RLS/private storage handle account-owned data. |
 
 ## Production Deployment Flow
 
@@ -123,7 +124,7 @@ flowchart LR
     record --> live["https://theslowchrome.com"]
 ```
 
-Key P0/P1 deployment controls:
+Deployment controls:
 
 - Production deploys use commit-derived short-SHA image tags, not `latest`.
 - The deploy script refuses mutable `IMAGE_TAG=latest`.
@@ -146,15 +147,7 @@ flowchart LR
     state --> ops["Update ops / release log"]
 ```
 
-Recovery documentation now includes:
-
-- `docs/runbooks/site-down.md`
-- `docs/runbooks/bad-deploy-rollback.md`
-- `docs/runbooks/disk-full.md`
-- `docs/ops-log.md`
-- `docs/release-log.md`
-- `docs/backup-restore-readiness.md`
-- `docs/production-observability-readiness.md`
+Supporting runbooks cover site-down response, bad-deploy rollback, disk-full recovery, release logging, observability readiness, and backup/restore readiness.
 
 ## Observability Stack
 
@@ -165,7 +158,7 @@ Recovery documentation now includes:
 | 3 | Container logs | Loki, Grafana Alloy |
 | 4 | Distributed tracing | OpenTelemetry, Collector, Tempo |
 | 5 | Alerting | Prometheus rules, Alertmanager, Grafana alerting overview |
-| P1 addition | Deployment identity and release visibility | `slowchrome_deployment_info`, deployment timestamp metrics, Grafana deployed SHA and deployment events panels |
+| Release visibility | Deployment identity and release state | `slowchrome_deployment_info`, deployment timestamp metrics, Grafana deployed SHA and deployment events panels |
 
 Dashboard and signal coverage includes:
 
