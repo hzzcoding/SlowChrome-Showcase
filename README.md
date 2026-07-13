@@ -5,7 +5,7 @@
 **SlowChrome is an AI-powered motorcycle customization platform that helps riders visualize future builds, discover relevant parts, and stay connected with motorcycle style trends and local events.**
 
 <p>
-  <img alt="Status" src="https://img.shields.io/badge/status-MVP%20showcase-blue">
+  <img alt="Status" src="https://img.shields.io/badge/status-HTTPS%20MVP-blue">
   <img alt="Source" src="https://img.shields.io/badge/source-private-lightgrey">
   <img alt="Frontend" src="https://img.shields.io/badge/frontend-Next.js-black">
   <img alt="Backend" src="https://img.shields.io/badge/backend-FastAPI-009688">
@@ -38,11 +38,11 @@ I built the full-stack MVP end to end, from the Next.js product experience and F
 
 | Highlight | What it shows |
 | --- | --- |
-| **Full-stack MVP** | Built a mobile-first Next.js frontend with a FastAPI backend for the core customization flow. |
+| **Full-stack customization platform** | Built a mobile-first Next.js product loop for style discovery, AI bike previews, parts direction, saved builds, and a culture feed. |
 | **AI image workflow** | Added YOLOv8 photo validation before server-side OpenAI image generation. |
 | **Cloud-backed garage** | Used Supabase Auth, Row Level Security, and private storage for account-owned saved builds. |
-| **Production-style deployment** | Containerized frontend/backend services and deployed them to an Azure VM with Docker Compose. |
-| **DevOps and observability** | Added GitHub Actions CI/CD plus Prometheus/Grafana monitoring, logs, traces, and alerts. |
+| **Production HTTPS deployment** | Deployed Dockerized frontend/backend services to an Azure VM behind a production domain and reverse proxy. |
+| **CI/CD and recovery readiness** | Added GitHub Actions test/build gates, visual sanity checks, SHA-tag deployments, smoke tests, rollback workflow, runbooks, and Grafana observability. |
 
 ## Product Scope
 
@@ -55,11 +55,13 @@ SlowChrome is more than an AI image generator. The product direction includes:
 
 ## Live Demo and Media
 
-Live demo, product screenshots, and a short walkthrough video will be added after the custom domain and HTTPS setup are finalized.
+**Live demo:** [https://theslowchrome.com](https://theslowchrome.com)
+
+Product screenshots and a short walkthrough video are planned as public showcase assets after the next visual QA pass.
 
 ## Tech Stack
 
-**Tech Stack:** Next.js, React, TypeScript, Tailwind CSS | FastAPI, YOLOv8, OpenAI Images | Supabase Auth/Storage | Docker, GitHub Actions, Azure VM | Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager.
+**Tech Stack:** Next.js, React, TypeScript, Tailwind CSS | FastAPI, YOLOv8, OpenAI Images | Supabase Auth/Storage | Docker, GitHub Actions, Azure VM, HTTPS reverse proxy | Playwright, Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager.
 
 ## Technical Deep Dive
 

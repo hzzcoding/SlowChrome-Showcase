@@ -1,21 +1,24 @@
 # SlowChrome Technical Case Study
 
-This document is the deeper engineering companion to the recruiter-friendly [README](../README.md). It explains the architecture, deployment model, observability stack, security boundaries, and tradeoffs behind SlowChrome.
+This document is the deeper engineering companion to the recruiter-friendly [README](../README.md). It explains the architecture, production deployment model, observability stack, recovery workflow, security boundaries, and tradeoffs behind SlowChrome.
 
 ## System Overview
 
-SlowChrome is an AI-powered motorcycle customization platform. The MVP combines a mobile-first product experience, motorcycle photo validation, server-side AI image generation, cloud-backed saved builds, and production-style deployment/observability.
+SlowChrome is an AI-powered motorcycle customization platform. The current MVP combines a mobile-first style flow, motorcycle photo validation, server-side AI image generation, personalized parts direction, cloud-backed saved builds, a manually curated explore feed, and production-style deployment/recovery controls.
 
 ```mermaid
 flowchart TD
-    user["Mobile rider"] --> frontend["Next.js 14 app"]
+    user["Rider / visitor"] --> domain["theslowchrome.com"]
+    domain --> proxy["HTTPS reverse proxy :443"]
+    proxy --> frontend["Next.js frontend :3000"]
     frontend --> api["Next.js API routes"]
-    api --> backend["FastAPI service"]
+    api --> backend["FastAPI backend :8000"]
     backend --> detector["YOLOv8 photo validation"]
-    api --> openai["OpenAI image generation"]
+    api --> openai["OpenAI Images API"]
     frontend --> supabase["Supabase Auth, Postgres, Storage"]
 
-    subgraph azure["Azure VM"]
+    subgraph vm["Azure Ubuntu VM"]
+        proxy
         frontend
         api
         backend
@@ -31,7 +34,7 @@ flowchart TD
     end
 
     backend --> health["/health"]
-    backend --> metrics["/metrics"]
+    backend --> metrics["/metrics and deployment identity"]
     prometheus --> metrics
     prometheus --> node
     prometheus --> cadvisor
@@ -54,9 +57,10 @@ sequenceDiagram
     participant N as Next.js API route
     participant B as FastAPI backend
     participant Y as YOLOv8 detector
-    participant O as OpenAI image API
+    participant O as OpenAI Images API
     participant S as Supabase
 
+    U->>F: Answer style and bike questions
     U->>F: Upload motorcycle photo
     F->>N: POST /api/validate-bike-photo
     N->>B: Forward inside Docker network
@@ -69,44 +73,88 @@ sequenceDiagram
     N->>O: Server-side image generation request
     O-->>N: Rendered concept
     F->>S: Save build and image when signed in
+    F-->>U: Show parts direction, saved build, news, and local events
 ```
+
+## Product Surface
+
+| Area | Current implementation |
+| --- | --- |
+| Homepage | Rebuilt around the core loop: taste answers, AI bike preview, style references, parts drops, news, and local culture. |
+| AI style flow | Mobile-first flow for profile selection, style consultation, bike upload, validation, and AI build result. |
+| Parts discovery | Curated product direction and representative parts tied to the generated build and user style direction. |
+| Cloud garage | Supabase-backed saved builds and garage state with local fallback when cloud config is unavailable. |
+| Explore feed | Hand-curated biweekly feed with motorcycle customization news, reference stories, and Vancouver local events calendar. |
+| News detail pages | Static news detail routes for feed articles with images and editorial copy. |
 
 ## Engineering Highlights
 
 | Area | Implementation |
 | --- | --- |
-| Frontend | Mobile-first Next.js product experience for style discovery, bike upload, build generation, saved builds, and explore feed. |
+| Frontend | Next.js 14 App Router, React, TypeScript, Tailwind CSS, mobile-first custom motorcycle visual system. |
 | Backend | FastAPI service validates uploaded motorcycle photos before the AI image workflow runs. |
-| AI workflow | YOLOv8 gates photo quality before server-side OpenAI image generation. |
-| Cloud garage | Supabase Auth, Postgres, Storage, and Row Level Security support account-owned saved builds. |
-| Parts discovery | Product flow includes parts recommendations tied to the user's motorcycle and customization direction. |
-| Explore feed | Biweekly customization news, style updates, and local motorcycle events are part of the platform direction. |
-| Deployment | Frontend and backend are containerized separately and deployed to an Azure VM with Docker Compose. |
-| CI/CD | GitHub Actions builds/pushes Docker images and deploys the stack. |
-| Observability | Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager, node-exporter, and cAdvisor provide visibility into app and infrastructure health. |
+| AI workflow | YOLOv8 gates photo quality before server-side OpenAI image generation; OpenAI key stays server-side. |
+| Cloud data | Supabase Auth, Postgres, Storage, and Row Level Security support account-owned saved builds and private images. |
+| Production entry | `https://theslowchrome.com` routes through a VM reverse proxy to an internal frontend port. |
+| Network perimeter | Public web traffic is intended for `80`/`443`; frontend `3000` and backend `8000` are not public entry points. |
+| CI/CD | GitHub Actions runs tests, production build, homepage visual sanity, backend tests, deployment tests, Docker build/push, deploy, smoke test, and deployment-state recording. |
+| Recovery | Manual rollback workflow can restore the previous deployment state or an explicit image tag, then smoke-test and record the rollback. |
+| Observability | Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager, node-exporter, and cAdvisor provide app, deployment, and infrastructure visibility. |
 
-## Deployment Flow
+## Production Deployment Flow
 
 ```mermaid
 flowchart LR
-    push["Push to main"] --> actions["GitHub Actions"]
-    actions --> frontendImage["Build frontend image"]
-    actions --> backendImage["Build backend image"]
-    frontendImage --> dockerHub["Docker Hub"]
-    backendImage --> dockerHub
-    actions --> sync["Sync Compose and monitoring files"]
-    sync --> vm["Azure VM"]
-    vm --> pull["docker compose pull"]
-    pull --> up["docker compose up"]
-    up --> app["MVP deployment"]
+    push["Push to main"] --> gate["GitHub Actions test/build gate"]
+    gate --> unit["Frontend tests"]
+    gate --> build["Next.js production build"]
+    gate --> visual["Playwright homepage visual sanity"]
+    gate --> backendTests["Backend + deploy tests"]
+    unit --> images["Build SHA-tagged Docker images"]
+    build --> images
+    visual --> images
+    backendTests --> images
+    images --> dockerHub["Docker Hub"]
+    dockerHub --> runner["Self-hosted runner on Azure VM"]
+    runner --> sync["Sync Compose, deploy scripts, monitoring config"]
+    sync --> deploy["Deploy immutable IMAGE_TAG"]
+    deploy --> smoke["Post-deploy smoke test"]
+    smoke --> record["Record current and previous deployment state"]
+    record --> live["https://theslowchrome.com"]
 ```
 
-Current hardening targets:
+Key P0/P1 deployment controls:
 
-- Deploy immutable commit-SHA tags instead of `latest`.
-- Add post-deploy smoke tests.
-- Document rollback to the previous known-good image.
-- Move public traffic from raw VM port access to domain + HTTPS reverse proxy.
+- Production deploys use commit-derived short-SHA image tags, not `latest`.
+- The deploy script refuses mutable `IMAGE_TAG=latest`.
+- The deploy job passes production Supabase and OpenAI configuration through GitHub Actions secrets.
+- Post-deploy smoke tests check the public HTTPS homepage, local frontend, backend health, and deployment identity metrics.
+- Deployment state is recorded under `.runtime/deployments/current.env`, `previous.env`, and `history.log`.
+
+## Rollback and Recovery Flow
+
+```mermaid
+flowchart LR
+    incident["Bad deploy or production issue"] --> workflow["Manual Rollback SlowChrome workflow"]
+    workflow --> target{"Rollback target"}
+    target --> previous["Use previous.env"]
+    target --> explicit["Use explicit image tag"]
+    previous --> redeploy["Deploy rollback target"]
+    explicit --> redeploy
+    redeploy --> smoke["Post-rollback smoke test"]
+    smoke --> state["Record rollback as current deployment"]
+    state --> ops["Update ops / release log"]
+```
+
+Recovery documentation now includes:
+
+- `docs/runbooks/site-down.md`
+- `docs/runbooks/bad-deploy-rollback.md`
+- `docs/runbooks/disk-full.md`
+- `docs/ops-log.md`
+- `docs/release-log.md`
+- `docs/backup-restore-readiness.md`
+- `docs/production-observability-readiness.md`
 
 ## Observability Stack
 
@@ -117,8 +165,9 @@ Current hardening targets:
 | 3 | Container logs | Loki, Grafana Alloy |
 | 4 | Distributed tracing | OpenTelemetry, Collector, Tempo |
 | 5 | Alerting | Prometheus rules, Alertmanager, Grafana alerting overview |
+| P1 addition | Deployment identity and release visibility | `slowchrome_deployment_info`, deployment timestamp metrics, Grafana deployed SHA and deployment events panels |
 
-Dashboard coverage includes:
+Dashboard and signal coverage includes:
 
 - Backend traffic by route.
 - Backend 5xx rate.
@@ -129,6 +178,7 @@ Dashboard coverage includes:
 - Frontend and backend logs.
 - Backend traces for routes such as `/health`, `/metrics`, and photo validation.
 - Firing and pending alerts by severity.
+- Deployed SHA and deployment event visibility.
 
 Operational note: monitoring services bind to localhost and are accessed through SSH tunnels instead of being exposed to the public internet.
 
@@ -136,8 +186,10 @@ Operational note: monitoring services bind to localhost and are accessed through
 
 | Boundary | Design choice |
 | --- | --- |
-| Backend exposure | FastAPI is reached through the frontend proxy and Docker network, not directly by the browser. |
-| AI credentials | OpenAI API key stays server-side. |
+| Public web entry | Production traffic enters through `https://theslowchrome.com`. |
+| Container ports | Frontend `3000` is local/internal; backend `8000` is Docker-network-only. |
+| Backend exposure | Browser calls a Next.js API route, which proxies to FastAPI inside the Docker network. |
+| AI credentials | OpenAI API key stays server-side and is passed through deployment secrets. |
 | Supabase keys | Browser receives only public anonymous configuration. |
 | User data | Builds and garage state are user-owned through Row Level Security policies. |
 | Image storage | Private storage bucket with per-user path policies. |
@@ -150,53 +202,62 @@ Operational note: monitoring services bind to localhost and are accessed through
 
 The browser needs to validate uploaded bike photos, but exposing FastAPI directly would create a wider public surface area. The current design sends browser traffic to a Next.js API route, then proxies to `http://backend:8000` inside Docker. The user flow stays simple while the backend port remains internal.
 
-### Account-backed saves without cross-user data access
+### Release traceability without a heavy platform
 
-Cloud saves use Supabase Auth with user-owned tables, private storage, and Row Level Security. The design goal is that signed-in users can retrieve their own builds while database and storage policies prevent access to another user's saved images.
+The app still runs on a single Azure VM, so the deployment process records a small runtime state file for the current and previous release. This gives the rollback workflow a concrete target without introducing a larger release-management system.
 
 ### Single-VM observability without public dashboards
 
 For the MVP, the monitoring stack runs on the same VM as the app. Grafana, Prometheus, Loki, Tempo, and Alertmanager bind locally and are inspected through SSH tunnels. This keeps the system debuggable without publishing internal operations tools.
 
+### Visual QA in CI
+
+The deploy gate includes a Playwright homepage sanity check that waits for the production build to serve locally, verifies key hero text, checks page dimensions, and uploads a homepage screenshot artifact. This catches blank or badly framed homepage regressions before Docker images are deployed.
+
 ## Current Status
 
 | Area | Status |
 | --- | --- |
-| Local app flow | Working for MVP development |
-| Azure VM hosting | Working for MVP testing |
+| Public HTTPS domain | Implemented at `https://theslowchrome.com` |
+| Reverse proxy and private app ports | Implemented for the current VM deployment |
 | Dockerized frontend/backend | Implemented |
-| GitHub Actions deployment | Implemented |
+| GitHub Actions test/build gate | Implemented |
+| SHA-tag Docker image deployment | Implemented |
+| Post-deploy smoke test | Implemented |
+| Deployment state recording | Implemented |
+| Manual rollback workflow | Implemented |
+| Core runbooks and ops/release logs | Implemented |
 | Supabase auth and cloud save code | Implemented |
-| Deployed auth redirect | Needs domain/DNS follow-up |
-| HTTPS/domain | Planned |
-| Production smoke tests | Planned |
-| Public demo assets | Planned |
+| Full deployed login/cloud-save/image-generation verification | Still needs end-to-end production verification |
+| TLS renewal documentation, SSH hardening, VM firewall, security headers | Remaining production hardening follow-ups |
 
 ## Roadmap
 
 Near-term production hardening:
 
-- [ ] Purchase and configure the production domain.
-- [ ] Add HTTPS with Caddy or Nginx.
-- [ ] Update Supabase redirect allowlists for the production domain.
-- [ ] Remove public access to raw port `3000`.
+- [ ] Document and test automatic TLS renewal.
+- [ ] Verify HTTP-to-HTTPS redirect behavior.
+- [ ] Restrict SSH and enable VM firewall where practical.
+- [ ] Add baseline security response headers.
 - [ ] Verify login, cloud saves, and image generation end to end on the production domain.
-- [ ] Add post-deploy smoke tests and rollback notes.
+- [ ] Run the first real rollback drill after two SHA-tagged deploys exist.
+- [ ] Complete backup/restore drill documentation.
 
 Portfolio enhancements:
 
 - [ ] Add a two-minute product video.
-- [ ] Add redacted Grafana dashboard screenshots.
+- [ ] Add redacted Grafana and GitHub Actions screenshots.
 - [ ] Add a polished architecture image.
-- [ ] Add a short runbook or incident example.
-- [ ] Add product screenshots or GIFs.
+- [ ] Add a short incident or rollback drill write-up.
+- [ ] Add product screenshots or GIFs from the latest mobile homepage and explore feed.
 
 ## Interview Talking Points
 
-- How to keep a backend private while still supporting browser uploads.
-- How to structure an AI workflow so validation happens before an expensive generation call.
-- How Supabase Row Level Security changes the data model for user-owned builds.
+- How to keep FastAPI private while supporting browser uploads through a Next.js proxy.
+- Why YOLO validation runs before OpenAI image generation.
+- How Supabase Row Level Security shapes account-owned build storage.
+- How the project moved from raw VM port access to a domain, HTTPS reverse proxy, and private container ports.
+- Why immutable image tags, smoke tests, and deployment identity metrics matter for rollback.
 - How to make a single-VM MVP observable without exposing operations dashboards.
-- How to evolve the current deployment from raw VM port access to domain, HTTPS, reverse proxy, smoke tests, and rollback.
-- What should move from prototype allowances to server-side entitlement enforcement before a paid launch.
+- What should move from prototype/local allowances to server-side entitlement enforcement before a paid launch.
 
