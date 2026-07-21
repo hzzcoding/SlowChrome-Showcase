@@ -1,243 +1,394 @@
 # SlowChrome SRE / DevOps Technical Case Study
 
-This document is the deeper engineering companion to the recruiter-friendly [README](../README.md). It focuses on the operational layer around SlowChrome: HTTPS entry, containerized services, CI/CD, observability, rollback readiness, security boundaries, and production tradeoffs.
+SlowChrome is a live AI-assisted motorcycle customization application. This
+case study examines the system around the product: delivery, recovery,
+observability, security boundaries, operational limits, and the planned
+migration from a single Azure VM to Azure Kubernetes Service (AKS).
 
-## System Overview
+The project is presented as an evidence trail rather than a list of tools:
 
-SlowChrome is the application being operated. This case study focuses on the production-style system around it: public HTTPS traffic enters through a reverse proxy, app services run as containers on an Azure VM, backend ports stay private, and the monitoring plane is accessed through SSH tunnels instead of public dashboards.
+- **Implemented and running** means the capability is present on the current
+  production platform.
+- **Implemented; external verification pending** means the code and deployment
+  path exist, but a recorded production journey is still required.
+- **Designed or planned** means there is an accepted design or implementation
+  plan, but it is not claimed as production experience yet.
+
+See the [portfolio overview](../README.md) for the shorter recruiter-facing
+version.
+
+## Executive Summary
+
+| Area | Current evidence | Status |
+| --- | --- | --- |
+| Runtime | Live HTTPS application on an Azure Spot VM using Docker Compose | Implemented and running |
+| Delivery | GitHub Actions quality gates, immutable commit-SHA images, smoke-tested deployment | Implemented and running |
+| Recovery | Candidate/current/previous release state and automatic restoration of the known-good release | Implemented and running |
+| Observability | Prometheus metrics, Loki logs, Tempo traces, Grafana dashboards, Alertmanager | Implemented and running |
+| Security boundaries | Private FastAPI service, server-side secrets, Supabase RLS/private storage | Implemented; full user journey verification pending |
+| Reliability program | SLI/SLO design, error-budget policy, external synthetics, and drill format | Designed; not production-verified |
+| Cloud-native platform | Terraform-managed AKS, Helm, Azure OIDC, ACR, Key Vault, Gateway API | Planned; not yet deployed |
+| Recovery evidence | Timestamped bad-deploy, Pod-loss, and node-drain measurements | Planned; not yet measured on AKS |
+
+## 1. The System Being Operated
+
+The product lets a user upload a motorcycle image, validate whether the photo
+is suitable, configure a future build, request an authenticated bounded AI
+render, and save garage/build state through Supabase.
+
+The operationally important boundaries are:
+
+- The browser reaches the public Next.js service over HTTPS.
+- FastAPI and YOLOv8 remain private inside the container network.
+- Next.js server routes broker privileged backend and OpenAI calls.
+- Supabase provides authentication, Postgres, Row Level Security, and private
+  object storage.
+- Application and infrastructure telemetry remain private and are inspected
+  through an SSH tunnel.
+
+## 2. Current Production Architecture
 
 ```mermaid
 flowchart TD
     user["User"] --> domain["theslowchrome.com"]
-    domain --> proxy["HTTPS reverse proxy :443"]
-    proxy --> frontend["Next.js app container :3000"]
-    frontend --> api["Next.js API routes"]
-    api --> backend["FastAPI backend container :8000"]
-    backend --> detector["YOLOv8 photo validation"]
-    api --> openai["OpenAI Images API"]
-    frontend --> supabase["Supabase Auth, Postgres, Storage"]
-    smoke["Post-deploy smoke tests"] --> domain
+    domain --> proxy["HTTPS reverse proxy"]
 
-    subgraph vm["Azure Ubuntu VM"]
-        proxy
-        frontend
-        api
-        backend
-        logs["Container stdout logs"]
+    subgraph vm["Azure Spot VM"]
+        proxy --> frontend["Next.js container"]
+        frontend --> backend["Private FastAPI + YOLO container"]
         prometheus["Prometheus"]
         grafana["Grafana"]
         loki["Loki"]
-        alloy["Grafana Alloy"]
         tempo["Tempo"]
+        alloy["Grafana Alloy"]
         otel["OpenTelemetry Collector"]
         alertmanager["Alertmanager"]
-        node["node-exporter"]
-        cadvisor["cAdvisor"]
+        host["node-exporter + cAdvisor"]
     end
 
-    backend --> health["/health"]
-    backend --> metrics["/metrics + deployment identity"]
-    smoke --> health
-    smoke --> metrics
-    frontend --> logs
-    backend --> logs
-    prometheus --> metrics
-    prometheus --> node
-    prometheus --> cadvisor
-    logs --> alloy
+    frontend --> supabase["Supabase Auth / Postgres / Storage"]
+    frontend --> openai["OpenAI Images API"]
+    prometheus --> frontend
+    prometheus --> backend
+    prometheus --> host
+    frontend --> alloy
+    backend --> alloy
+    alloy --> loki
     backend --> otel
     otel --> tempo
-    alloy --> loki
     prometheus --> alertmanager
     grafana --> prometheus
     grafana --> loki
     grafana --> tempo
-    grafana --> alertmanager
 ```
 
-## Runtime Request Path
+This architecture is intentionally inexpensive and understandable, but the VM
+is also one failure domain for the application, monitoring, and self-hosted
+deployment runner. Because it is a Spot VM, platform eviction is an additional
+availability risk.
 
-The main AI workflow is useful as an SRE view because it shows the public/private network boundary, where server-side credentials are used, and where app telemetry is produced.
+## 3. Runtime Request Path
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant F as Next.js frontend
-    participant N as Next.js API route
-    participant B as FastAPI backend
-    participant Y as YOLOv8 detector
-    participant O as OpenAI Images API
+    participant F as Next.js
+    participant B as FastAPI
+    participant Y as YOLOv8
+    participant O as OpenAI Images
     participant S as Supabase
-    participant M as Observability stack
+    participant T as Telemetry
 
-    U->>F: Open app and start AI workflow
     U->>F: Upload motorcycle photo
-    F->>N: POST /api/validate-bike-photo
-    N->>B: Forward inside Docker network
-    B->>Y: Detect and classify photo usability
+    F->>B: Proxy validation inside private network
+    B->>Y: Detect and assess photo
     Y-->>B: Approved, warning, or rejected
-    B-->>M: Emit metrics, logs, and traces
-    B-->>N: Validation result
-    N-->>F: Display guidance
-    U->>F: Request future-build render
-    F->>N: POST /api/generate-build-image
-    N->>O: Server-side image generation request
-    O-->>N: Rendered concept
-    N-->>F: Return generated image
-    N-->>M: Emit request and deployment signals
-    F->>S: Save build and image for signed-in users
-    F-->>U: Show generated build result
+    B-->>T: Metrics, logs, and traces
+    B-->>F: Validation result
+    F-->>U: Display guidance
+    U->>F: Request authenticated render
+    F->>F: Apply bounded rate/concurrency controls
+    F->>O: Server-side image request
+    O-->>F: Generated concept
+    F->>S: Store user-owned build/image state
+    F-->>T: Request and deployment signals
+    F-->>U: Display result
 ```
 
-## Operational Highlights
+The render controls are currently process-local. Running multiple frontend
+replicas would therefore multiply the effective limit. The frontend remains
+single-replica until this coordination state is moved to a shared service such
+as Redis or another durable control plane.
 
-| Area | Implementation |
-| --- | --- |
-| Public entry | `https://theslowchrome.com` routes through an HTTPS reverse proxy to the internal app container. |
-| Containerized services | Next.js and FastAPI run as separate Docker services with clear app/backend boundaries. |
-| Private backend network | Browser traffic reaches FastAPI through a Next.js API route; the backend is not a public entry point. |
-| CI/CD | GitHub Actions runs build/test gates, visual sanity checks, backend/deploy tests, Docker build/push, deploy, smoke test, and deployment-state recording. |
-| Immutable releases | Production deploys use commit-derived short-SHA image tags instead of mutable `latest` tags. |
-| Recovery | Manual rollback can restore the previous deployment state or an explicit image tag, then smoke-test and record the result. |
-| Observability | Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alertmanager, node-exporter, and cAdvisor provide app, deployment, and infrastructure visibility. |
-| Security boundaries | AI credentials stay server-side; Supabase Auth/RLS/private storage handle account-owned data. |
+## 4. CI/CD and Release Recovery
 
-## Production Deployment Flow
+### Quality and security gates
+
+The GitHub Actions pipeline currently includes:
+
+- frontend tests, `npm audit`, and a production Next.js build;
+- a Playwright homepage visual sanity check;
+- Python/backend and deployment-script tests;
+- `pip-audit`;
+- Terraform formatting and validation;
+- frontend/backend container builds; and
+- Trivy image scans.
+
+Images are tagged with a commit-derived SHA and pushed before deployment.
+Mutable `latest` is not accepted as a production release identity.
+
+### Deployment state machine
 
 ```mermaid
 flowchart LR
-    push["Push to main"] --> gate["GitHub Actions test/build gate"]
-    gate --> unit["Frontend tests"]
-    gate --> build["Next.js production build"]
-    gate --> visual["Playwright homepage visual sanity"]
-    gate --> backendTests["Backend + deploy tests"]
-    unit --> images["Build SHA-tagged Docker images"]
-    build --> images
-    visual --> images
-    backendTests --> images
-    images --> dockerHub["Docker Hub"]
-    dockerHub --> runner["Self-hosted runner on Azure VM"]
-    runner --> sync["Sync Compose, deploy scripts, monitoring config"]
-    sync --> deploy["Deploy immutable IMAGE_TAG"]
-    deploy --> smoke["Post-deploy smoke test"]
-    smoke --> record["Record current and previous deployment state"]
-    record --> live["https://theslowchrome.com"]
+    push["Push to main"] --> gate["Tests, audits, build, scans"]
+    gate --> image["Publish commit-SHA images"]
+    image --> attempted["Record attempted candidate"]
+    attempted --> deploy["Deploy candidate"]
+    deploy --> smoke{"Internal + public smoke tests"}
+    smoke -->|pass| promote["Promote to current; move old current to previous"]
+    smoke -->|fail| restore["Redeploy known-good current"]
+    restore --> recovery{"Recovery smoke tests"}
+    recovery -->|pass| failed["Candidate remains failed; service recovered"]
+    recovery -->|fail| incident["Escalate service incident"]
 ```
 
-Deployment controls:
+The three release pointers have distinct meanings:
 
-- Production deploys use commit-derived short-SHA image tags, not `latest`.
-- The deploy script refuses mutable `IMAGE_TAG=latest`.
-- The deploy job passes production Supabase and OpenAI configuration through GitHub Actions secrets.
-- Post-deploy smoke tests check the public HTTPS homepage, local frontend, backend health, and deployment identity metrics.
-- Deployment state is recorded under `.runtime/deployments/current.env`, `previous.env`, and `history.log`.
+- `attempted`: the candidate currently being evaluated;
+- `current`: the latest release that passed smoke tests; and
+- `previous`: the successful release before `current`.
 
-## Rollback and Recovery Flow
+This prevents a failed candidate from overwriting the known-good pointer. If
+candidate smoke tests fail, the deployment script automatically restores and
+re-verifies `current`. The workflow still fails, preserving the evidence that
+the candidate was defective. A separate manual rollback path can target
+`previous` or an explicit immutable image tag.
 
-```mermaid
-flowchart LR
-    incident["Bad deploy or production issue"] --> workflow["Manual Rollback SlowChrome workflow"]
-    workflow --> target{"Rollback target"}
-    target --> previous["Use previous.env"]
-    target --> explicit["Use explicit image tag"]
-    previous --> redeploy["Deploy rollback target"]
-    explicit --> redeploy
-    redeploy --> smoke["Post-rollback smoke test"]
-    smoke --> state["Record rollback as current deployment"]
-    state --> ops["Update ops / release log"]
-```
+Smoke tests cover the public HTTPS page, the local frontend, backend health, and
+deployment identity. The release log makes a deployed workload traceable to a
+Git commit and recovery outcome.
 
-Supporting runbooks cover site-down response, bad-deploy rollback, disk-full recovery, release logging, observability readiness, and backup/restore readiness.
+## 5. Failure Model
 
-## Observability Stack
-
-| Phase | Scope | Tools |
+| Failure | Current detection/control | Residual gap |
 | --- | --- | --- |
-| 1 | Backend golden signals | FastAPI metrics, Prometheus, Grafana |
-| 2 | VM and container saturation | node-exporter, cAdvisor |
-| 3 | Container logs | Loki, Grafana Alloy |
-| 4 | Distributed tracing | OpenTelemetry, Collector, Tempo |
-| 5 | Alerting | Prometheus rules, Alertmanager, Grafana alerting overview |
-| Release visibility | Deployment identity and release state | `slowchrome_deployment_info`, deployment timestamp metrics, Grafana deployed SHA and deployment events panels |
+| Bad application release | CI gates, immutable candidate, public/internal smoke tests, automatic known-good restoration | Recovery time has not yet been captured as a formal drill metric |
+| Frontend/backend process failure | Docker health checks, metrics, logs, alerts, restart policy | Both services still share one VM |
+| Spot eviction or VM loss | Runbooks and reproducible Compose deployment | Application, telemetry, and self-hosted runner share the failed host |
+| Disk pressure | node-exporter/cAdvisor signals, alerting, disk-full runbook | No independent telemetry plane if the host is unavailable |
+| OpenAI or Supabase degradation | Application errors, latency signals, bounded AI requests | Third-party dependency objectives need calibrated SLIs |
+| Monitoring-stack failure | Scrape health and component visibility while VM is reachable | Same-host monitoring cannot independently prove VM availability |
+| Operator/configuration error | Version-controlled configuration, deploy tests, immutable images | Infrastructure is not yet fully Terraform-managed |
 
-Dashboard and signal coverage includes:
+The central lesson is that application redundancy alone is insufficient when
+the deployment runner, monitoring plane, and workload share one host.
 
-- Backend traffic by route.
-- Backend 5xx rate.
-- Backend p95 latency.
-- Backend scrape health.
-- VM CPU, memory, disk, and network utilization.
-- Container CPU, memory, and restart signals.
-- Frontend and backend logs.
-- Backend traces for routes such as `/health`, `/metrics`, and photo validation.
-- Firing and pending alerts by severity.
-- Deployed SHA and deployment event visibility.
+## 6. Observability
 
-Operational note: monitoring services bind to localhost and are accessed through SSH tunnels instead of being exposed to the public internet.
+| Signal | Implementation | Operational question |
+| --- | --- | --- |
+| Metrics | FastAPI/Next.js signals, Prometheus, node-exporter, cAdvisor | Is traffic, latency, error rate, or saturation abnormal? |
+| Logs | Container stdout, Grafana Alloy, Loki | Which service and release produced the failure? |
+| Traces | OpenTelemetry Collector and Tempo | Where did a request spend time or fail? |
+| Dashboards | Grafana golden-signals, infrastructure, logs, alerts | What changed and how broad is the impact? |
+| Alerts | Prometheus rules and Alertmanager | Which symptoms require operator action? |
+| Release identity | Deployment info/timestamp metrics and release state | Which commit is live during the incident? |
 
-## Observability Evidence
+Monitoring endpoints are not exposed publicly. The screenshots below are
+static, redacted evidence captured through a private SSH tunnel.
 
-The screenshots below were captured from the SlowChrome Grafana instance through a local SSH tunnel on July 12, 2026. They are static, portfolio-safe evidence of the monitoring stack; the live operations dashboards remain private.
+### Backend golden signals
 
-| Dashboard | What it demonstrates |
+![Backend golden signals](../assets/grafana-backend-golden-signals.png)
+
+### Infrastructure saturation and deployment identity
+
+![Infrastructure saturation](../assets/grafana-infrastructure-saturation.png)
+
+### Centralized container logs
+
+![Container logs](../assets/grafana-container-logs.png)
+
+### Alert state
+
+![Alerting overview](../assets/grafana-alerting-overview.png)
+
+### Example investigation path
+
+For a reported slow validation request:
+
+1. Confirm the symptom and deployed SHA on the Grafana overview.
+2. Compare request rate, 5xx rate, and p95 latency by route.
+3. Check VM/container CPU and memory for saturation.
+4. Filter Loki logs by backend service and the incident time window.
+5. Follow a Tempo trace to separate proxy, FastAPI, model, and dependency time.
+6. Correlate the first abnormal signal with the deployment event.
+
+This path links a user-visible symptom to a release, service, host constraint,
+or third-party dependency rather than treating dashboards as decoration.
+
+## 7. Reliability Program: Designed, Not Yet Claimed
+
+The reliability design proposes an initial 14-day measurement window and a
+99.9% availability objective for the public application. AI-render success and
+latency objectives will be calibrated from real traffic rather than invented
+up front.
+
+The planned program includes:
+
+- externally hosted synthetic checks so VM failure remains observable;
+- explicit availability, error, and latency SLIs;
+- multi-window burn-rate alerting;
+- an error-budget policy connected to release decisions;
+- timestamped failure-drill templates; and
+- MTTD plus MTTR/RTO reporting.
+
+These are design targets, not production results. No SLO compliance percentage,
+error-budget consumption, or measured recovery number is claimed until the
+queries, external checks, and drill evidence exist.
+
+## 8. Security and Data Boundaries
+
+| Boundary | Control |
 | --- | --- |
-| Backend Golden Signals | Traffic, error-rate panel, p95 latency, and FastAPI scrape health. |
-| Infrastructure Saturation | VM CPU, memory, disk, network, exporter health, and deployment identity panels. |
-| Container Logs | Loki-backed container log search through Grafana. |
-| Alerting Overview | Prometheus/Grafana alert visibility for firing and pending alert states. |
+| Public entry | HTTPS domain routes only to the web entry point |
+| Backend | FastAPI is reached through a Next.js server route, not a public browser endpoint |
+| AI credentials | OpenAI credentials stay server-side and enter deployment through secrets |
+| Authentication | Supabase Auth establishes user identity |
+| Database | Row Level Security constrains account-owned records |
+| Object storage | Private bucket and per-user paths protect generated assets |
+| Operations surfaces | Grafana, Prometheus, Loki, Tempo, and Alertmanager remain private |
+| Portfolio repository | Source, state, kubeconfig, environment files, tokens, private logs, and user data are excluded |
 
-### Backend Golden Signals
+The production flow for login, cloud persistence, and authenticated rendering
+is implemented, but a recorded end-to-end verification on the final domain is
+still listed as required evidence.
 
-![SlowChrome Backend Golden Signals Grafana dashboard](../assets/grafana-backend-golden-signals.png)
+## 9. Operational Artifacts
 
-### Infrastructure Saturation
+The private source repository contains:
 
-![SlowChrome Infrastructure Saturation Grafana dashboard](../assets/grafana-infrastructure-saturation.png)
+- site-down, bad-deploy, disk-full, and release-management runbooks;
+- deployment and manual rollback scripts;
+- automated deployment-script tests;
+- observability readiness and backup/restore checklists;
+- CI/CD workflows and container definitions;
+- SLO/error-budget design material; and
+- the staged AKS migration design and implementation plan.
 
-### Container Logs
+This public repository summarizes those artifacts without publishing sensitive
+configuration or pretending that planned controls are already operational.
 
-![SlowChrome Container Logs Grafana dashboard](../assets/grafana-container-logs.png)
+## 10. Engineering Tradeoffs
 
-### Alerting Overview
+| Decision | Benefit | Cost / follow-up |
+| --- | --- | --- |
+| Single VM + Compose baseline | Low cost, fast iteration, easy end-to-end debugging | One host contains the workload, runner, and telemetry plane |
+| Private FastAPI behind Next.js | Smaller public attack surface and server-side control | Adds a proxy hop and requires correlated telemetry |
+| Immutable SHA images | Traceable releases and deterministic rollback targets | Requires explicit retention and state management |
+| Automatic known-good recovery | A rejected candidate does not remain live | Recovery logic itself must be tested and observed |
+| Same-host monitoring | Affordable, rich local diagnosis | Cannot independently observe total host loss |
+| Single frontend replica | Preserves correctness of process-local AI limits | No horizontal availability until coordination state is externalized |
+| Parallel AKS migration | Keeps a proven rollback origin during learning and cutover | Temporarily operates two platforms |
 
-![SlowChrome Alerting Overview Grafana dashboard](../assets/grafana-alerting-overview.png)
+## 11. Planned AKS Target
 
-## Security and Data Boundaries
+The cloud-native phase is intended to add operational evidence, not merely
+replace `docker compose up` with `kubectl apply`.
 
-| Boundary | Design choice |
+```mermaid
+flowchart TD
+    user["User"] --> dns["DNS"]
+    dns --> gateway["Gateway API + managed TLS"]
+
+    subgraph aks["Azure Kubernetes Service"]
+        gateway --> front["Next.js Deployment"]
+        front --> back["FastAPI Deployment"]
+        hpa["HPA / scaling controls"]
+        obs["Metrics, logs, traces"]
+        front --> obs
+        back --> obs
+    end
+
+    gha["GitHub Actions + Azure OIDC"] --> acr["Azure Container Registry"]
+    gha --> helm["Helm atomic release"]
+    acr --> front
+    acr --> back
+    helm --> aks
+    kv["Azure Key Vault + Workload Identity"] --> front
+    kv --> back
+    tf["Terraform remote state"] --> aks
+    tf --> acr
+    tf --> kv
+    front --> supabase["Supabase"]
+    front --> openai["OpenAI"]
+    dns -. "rollback during observation window" .-> vm["Existing VM origin"]
+```
+
+### Staged implementation
+
+1. Package and test the application locally with Helm and kind.
+2. Establish Terraform remote state and GitHub-to-Azure OIDC.
+3. Provision ACR, Key Vault, AKS, identity, and supporting networking.
+4. Add Gateway API, managed TLS, immutable images, and atomic delivery.
+5. Reproduce metrics, logs, traces, dashboards, and deployment identity on AKS.
+6. Run bad-deploy, Pod-loss, and node-drain drills with timestamped evidence.
+7. Move DNS only after application, observability, and recovery gates pass.
+8. Keep the VM origin available for an observed rollback window before
+   retirement.
+
+### Acceptance evidence
+
+| Capability | Evidence required before claiming completion |
 | --- | --- |
-| Public web entry | Production traffic enters through `https://theslowchrome.com`. |
-| Container ports | Frontend `3000` is local/internal; backend `8000` is Docker-network-only. |
-| Backend exposure | Browser calls a Next.js API route, which proxies to FastAPI inside the Docker network. |
-| AI credentials | OpenAI API key stays server-side and is passed through deployment secrets. |
-| Supabase keys | Browser receives only public anonymous configuration. |
-| User data | Builds and garage state are user-owned through Row Level Security policies. |
-| Image storage | Private storage bucket with per-user path policies. |
-| Operations access | Grafana, Prometheus, Loki, Tempo, and Alertmanager are intended for tunnelled access. |
-| Public showcase | This repository excludes source code, `.env` files, private logs, tokens, and unredacted screenshots. |
+| Infrastructure as Code | Reviewable Terraform plan, remote state, and reproducible apply |
+| Secretless CI/CD | GitHub OIDC authentication without long-lived Azure credentials |
+| Kubernetes packaging | Helm lint/template tests and a successful kind deployment |
+| AKS delivery | Immutable ACR image, atomic Helm release, rollout and public smoke evidence |
+| Kubernetes observability | Metrics, logs, traces, events, dashboards, and deployed SHA |
+| Bad-deploy recovery | Failed candidate, automatic rollback, service recovery, measured duration |
+| Pod-loss recovery | Pod deletion timestamp, rescheduling, readiness restoration, measured duration |
+| Node maintenance | Drain/eviction evidence, workload continuity or bounded recovery, measured duration |
+| Production cutover | DNS change, stable observation window, and rehearsed VM rollback path |
 
-## Engineering Tradeoffs
+AKS, Terraform-managed Azure infrastructure, and Kubernetes recovery metrics
+remain explicitly **planned** at the time of this baseline.
 
-| Decision | Why it matters |
-| --- | --- |
-| Keep FastAPI private behind a Next.js API proxy | Browser uploads can reach the validation workflow without exposing the backend as a public internet service. |
-| Use short-SHA image tags instead of `latest` | Each deploy maps back to a specific commit, which makes smoke tests, rollback, and incident review concrete. |
-| Run monitoring on the same VM, accessed by SSH tunnel | The MVP stays inexpensive and debuggable while keeping Grafana, Prometheus, Loki, Tempo, and Alertmanager off the public internet. |
-| Add Playwright visual sanity to the deploy gate | A lightweight homepage screenshot check catches blank-page and major layout regressions before images are promoted. |
+## 12. Before/After Evidence Strategy
 
-## Production Readiness
+| Dimension | Pre-AKS baseline | Target post-AKS evidence |
+| --- | --- | --- |
+| Runtime | Compose services on one Spot VM | Declarative AKS workloads managed by Helm |
+| Infrastructure | VM-oriented, partially scripted | Terraform-managed Azure resources and remote state |
+| Delivery identity | Docker Hub commit-SHA images | ACR digests/SHA plus Kubernetes deployment identity |
+| Deployment safety | Automatic known-good Compose recovery | Atomic Helm rollback plus measured recovery |
+| Failure isolation | Single host | Pod and node failure domains |
+| Availability signal | Same-host monitoring | External synthetics plus cluster/application telemetry |
+| Operations evidence | Runbooks and dashboards | Timestamped Kubernetes drills with MTTD and MTTR/RTO |
+| Cutover safety | Current production origin | Parallel origin, DNS cutover, and retained rollback window |
 
-| Area | State |
-| --- | --- |
-| Public web entry | Live at `https://theslowchrome.com` behind HTTPS reverse proxy. |
-| App deployment | Frontend/backend are Dockerized and deployed with immutable short-SHA image tags. |
-| CI/CD safety | GitHub Actions runs build/test gates, visual sanity, deploy, post-deploy smoke checks, and deployment-state recording. |
-| Recovery | Manual rollback workflow can restore the previous deployment state or an explicit image tag. |
-| Observability | Grafana dashboards cover backend golden signals, VM/container saturation, logs, traces, alerts, and deployment identity. |
-| Remaining production hardening | End-to-end login/cloud-save/image-generation verification, TLS renewal drill, SSH/firewall tightening, and baseline security headers. |
+## 13. Current Gaps
 
-## Next Improvements
+- The production VM is interruptible and remains a single failure domain.
+- Same-host monitoring cannot independently prove total-host availability.
+- The signed-in cloud save/render journey needs recorded external verification.
+- Backup/restore and failure drills need measured results.
+- The SLO/error-budget design is not yet production-verified.
+- Shared render-control state is required before horizontal frontend scaling.
+- AKS and Terraform implementation has not started; the present evidence is the
+  design, staged plan, and honest pre-migration baseline.
 
-- Verify the full signed-in production flow on the final domain: login, cloud saves, and image generation.
-- Run and document the first rollback drill after multiple SHA-tagged deploys exist.
-- Add GitHub Actions screenshots and a short product walkthrough video to the showcase.
+## 14. Interview Discussion Paths
+
+- Trace a commit from CI gates to immutable image, candidate deployment, smoke
+  decision, and automatic recovery.
+- Use the Grafana evidence to investigate a latency or 5xx incident.
+- Explain why same-host monitoring is useful but cannot be the availability
+  authority.
+- Discuss why process-local rate limiting blocks honest horizontal scaling.
+- Compare a Compose rollback with an atomic Helm rollback and the evidence each
+  should produce.
+- Explain why the VM remains available during AKS DNS cutover.
+- Identify which statements are current production facts, which need external
+  verification, and which are future acceptance criteria.
