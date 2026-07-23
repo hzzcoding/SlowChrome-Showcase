@@ -1,22 +1,20 @@
 <div align="center">
 
-# SlowChrome SRE / DevOps Case Study
+# SlowChrome — Cloud-Native Operations Case Study
 
-**Operating a live AI web application with traceable releases, automatic recovery, full-stack observability, and an evidence-driven path from a single VM to AKS.**
+**An AI web application evolved from a single Azure VM into a real, time-boxed AKS evidence environment with Terraform, OIDC delivery, Helm, observability, and measured recovery exercises.**
 
 <p>
-  <img alt="Status" src="https://img.shields.io/badge/status-live%20HTTPS-16A34A">
-  <img alt="Current platform" src="https://img.shields.io/badge/current-Azure%20VM%20%2B%20Compose-0078D4">
-  <img alt="Delivery" src="https://img.shields.io/badge/delivery-GitHub%20Actions-2088FF">
+  <img alt="Scope" src="https://img.shields.io/badge/scope-AKS%20evidence%20captured-326CE5">
+  <img alt="Delivery" src="https://img.shields.io/badge/delivery-GitHub%20Actions%20%2B%20OIDC-2088FF">
+  <img alt="Runtime" src="https://img.shields.io/badge/runtime-VM%20baseline%20%2B%20AKS-0078D4">
   <img alt="Observability" src="https://img.shields.io/badge/observability-metrics%20%7C%20logs%20%7C%20traces-F46800">
-  <img alt="Next platform" src="https://img.shields.io/badge/next-AKS%20%2B%20Terraform-326CE5">
 </p>
 
 <p>
-  <a href="https://theslowchrome.com">Live Site</a> ·
-  <a href="#30-second-summary">30-Second Summary</a> ·
-  <a href="#architecture-today">Architecture</a> ·
-  <a href="#operational-evidence">Operational Evidence</a> ·
+  <a href="https://theslowchrome.com">Product Demo</a> ·
+  <a href="#recruiter-scan">Recruiter Scan</a> ·
+  <a href="#evidence-gallery">Evidence Gallery</a> ·
   <a href="docs/technical-case-study.md">Technical Case Study</a>
 </p>
 
@@ -25,183 +23,117 @@
 ---
 
 > **Repository boundary:** this is a public, documentation-only portfolio
-> repository. Production source code, credentials, private logs, Terraform
-> state, environment files, kubeconfig, and user data are intentionally excluded.
+> repository. It contains sanitized architecture and operational evidence, not
+> application source code, credentials, Terraform state, kubeconfig, private
+> logs, Azure resource names, or user data.
 
-## 30-Second Summary
+## Recruiter Scan
 
-SlowChrome is a live motorcycle customization application built with Next.js,
-FastAPI, YOLOv8, OpenAI Images, and Supabase. My SRE/DevOps work focuses on
-making the application deployable, observable, recoverable, and honest about
-its production limits.
+SlowChrome is an AI-assisted motorcycle customization app built with Next.js,
+FastAPI, YOLOv8, OpenAI Images, and Supabase. The operational story is more
+important here than a list of tools: I started with a debuggable Docker Compose
+deployment on Azure, then built a short-lived AKS environment to prove a
+cloud-native delivery and recovery path before deciding on a permanent runtime.
 
-| What it demonstrates | Inspectable evidence | Interview angle |
+| What I built | Why it matters | Evidence to inspect |
 | --- | --- | --- |
-| Production delivery | HTTPS site, non-root containers, commit-SHA images, GitHub Actions quality gates | How a commit becomes a traceable release |
-| Release safety | Candidate/current/previous deployment state, public smoke tests, automatic known-good recovery, manual rollback | How failed releases avoid becoming known-good |
-| Observability | Prometheus metrics, Loki logs, Tempo traces, Grafana dashboards, Alertmanager | How I move from a user symptom to a deployment or infrastructure cause |
-| Security boundaries | Private FastAPI service, server-side AI credentials, authenticated bounded renders, Supabase RLS/private storage | How public and privileged paths are separated |
-| Reliability engineering | Runbooks, deployment identity, SLO/error-budget design, planned measurable drills | How reliability claims are converted into evidence |
-| Cloud-native progression | A staged AKS/Terraform/Helm/OIDC migration design that preserves the VM rollback path | Why I chose parallel migration instead of a big-bang cutover |
+| Terraform-managed Azure foundation | Infrastructure changes are reviewable and repeatable rather than console-only. | [Technical architecture](docs/technical-case-study.md#3-aks-foundation-and-delivery) |
+| GitHub Actions → Azure OIDC → AKS delivery | CI can deploy immutable images without storing a long-lived Azure secret in GitHub. | [Delivery flow](docs/technical-case-study.md#3-aks-foundation-and-delivery) |
+| Helm-managed frontend and private backend | The application is deployed as Kubernetes workloads with explicit rollout and rollback behavior. | [AKS topology](docs/technical-case-study.md#4-aks-runtime-topology) |
+| Metrics, logs, traces, dashboards, and alerts | Diagnosis is based on correlated operational signals instead of SSH-only debugging. | [Observability](docs/technical-case-study.md#5-kubernetes-observability) |
+| Measured recovery exercises | A bad configuration, Pod loss, internal alert-pipeline flow, and planned node maintenance were tested with timestamps. | [Recovery evidence](docs/technical-case-study.md#6-measured-recovery-exercises) |
 
-## Current Status
+## What Changed — Without Rewriting History
 
-| State | Scope |
-| --- | --- |
-| **Implemented and running** | Azure VM, Docker Compose, HTTPS, immutable images, CI/CD, automatic deployment recovery, metrics, logs, traces, dashboards, and alerts |
-| **Implemented in source; external verification still required** | Supabase login/cloud persistence and authenticated OpenAI render flow |
-| **Designed and planned** | SLO/error-budget program and the AKS/Terraform migration |
-| **Not yet claimed** | AKS production deployment, Kubernetes-native observability, measured Kubernetes recovery drills, or VM retirement |
-
-The current platform is intentionally preserved as a pre-AKS baseline. Future
-updates will show before/after evidence rather than rewriting history as if the
-system had always run on Kubernetes.
-
-## Architecture Today
-
-```mermaid
-flowchart TD
-    user["User"] --> domain["theslowchrome.com"]
-    domain --> proxy["HTTPS reverse proxy"]
-
-    subgraph vm["Azure VM"]
-        proxy --> frontend["Next.js container"]
-        frontend --> backend["Private FastAPI + YOLO container"]
-        prometheus["Prometheus"]
-        grafana["Grafana"]
-        loki["Loki"]
-        tempo["Tempo"]
-        alloy["Grafana Alloy"]
-        otel["OpenTelemetry Collector"]
-        alertmanager["Alertmanager"]
-        host["node-exporter + cAdvisor"]
-    end
-
-    frontend --> supabase["Supabase Auth / Postgres / Storage"]
-    frontend --> openai["OpenAI Images API"]
-    prometheus --> frontend
-    prometheus --> backend
-    prometheus --> host
-    frontend --> alloy
-    backend --> alloy
-    alloy --> loki
-    backend --> otel
-    otel --> tempo
-    prometheus --> alertmanager
-    grafana --> prometheus
-    grafana --> loki
-    grafana --> tempo
-```
-
-The public browser reaches FastAPI only through a Next.js server route. The
-backend and monitoring interfaces are not public entry points.
-
-## Release and Recovery Model
+The existing Azure VM remains the original application baseline. AKS was built
+beside it as a real but temporary evidence environment; this Showcase does **not**
+claim a DNS cutover, a high-traffic production migration, or that the VM has
+already been retired.
 
 ```mermaid
 flowchart LR
-    push["Push to main"] --> gate["Tests, build, audit, scan"]
-    gate --> images["Commit-SHA images"]
-    images --> candidate["Deploy candidate"]
-    candidate --> smoke{"Public + internal smoke tests"}
-    smoke -->|pass| promote["Promote candidate to current"]
-    smoke -->|fail| recover["Redeploy known-good current"]
-    recover --> verify["Verify recovery"]
-    promote --> history["Record release history"]
-    verify --> history
+    user["Browser"] --> vm["Existing Azure VM baseline\nNext.js + private FastAPI\nDocker Compose"]
+
+    subgraph delivery["Cloud-native evidence path"]
+        gha["GitHub Actions"] --> oidc["Azure OIDC"]
+        oidc --> tf["Terraform-managed Azure foundation"]
+        gha --> images["Immutable container images"]
+        images --> helm["Helm release"]
+    end
+
+    subgraph aks["Temporary AKS evidence environment"]
+        helm --> web["Next.js Deployment"]
+        web --> api["Private FastAPI Deployment"]
+        obs["Prometheus · Loki · Tempo\nGrafana · Alertmanager"]
+        web --> obs
+        api --> obs
+    end
 ```
 
-The release state has explicit meanings:
+The value of the AKS work is therefore not the word “Kubernetes” on its own. It
+is a concrete chain from infrastructure definition to delivery identity,
+workload health, telemetry, controlled failure, and measured recovery.
 
-- `attempted`: the candidate currently being evaluated.
-- `current`: the most recent release that passed smoke tests.
-- `previous`: the successful release before current.
+## Evidence Gallery
 
-A failed candidate is not promoted. The workflow automatically restores and
-verifies the known-good current image, records the recovery outcome, and still
-reports the candidate deployment as failed for investigation.
+These are static, sanitized screenshots of private operations surfaces. They
+contain no credentials, user data, cluster identifiers, IP addresses, or raw
+logs.
 
-## Operational Evidence
-
-![SlowChrome Grafana observability preview](assets/grafana-observability-preview.png)
-
-| Evidence | What it proves |
+| Evidence | What it shows |
 | --- | --- |
-| [Backend golden signals](assets/grafana-backend-golden-signals.png) | Request rate, errors, p95 latency, and scrape health |
-| [Infrastructure saturation](assets/grafana-infrastructure-saturation.png) | VM CPU, memory, disk, network, exporter health, and deployment identity |
-| [Container logs](assets/grafana-container-logs.png) | Centralized Loki log search by service |
-| [Alerting overview](assets/grafana-alerting-overview.png) | Firing/pending alert state and operational visibility |
-| [Technical case study](docs/technical-case-study.md) | Architecture, delivery, security, tradeoffs, recovery, and migration rationale |
+| ![AKS Grafana overview](assets/aks-observability-dashboard.png) | The AKS observability overview after the monitoring stack and application signals became healthy. |
+| ![AKS operational signals](assets/aks-observability-signals.png) | Kubernetes/application signals used for the recovery evidence. |
+| [VM observability baseline](assets/grafana-observability-preview.png) | The original single-VM operational baseline that motivated the parallel AKS work. |
 
-Grafana, Prometheus, Loki, Tempo, and Alertmanager remain private. The images in
-this repository are static, redacted portfolio evidence captured through an SSH
-tunnel.
+## Cloud-Native Proof Points
 
-## Engineering Decisions
+| Area | Implemented evidence | Deliberate boundary |
+| --- | --- | --- |
+| Infrastructure | Terraform creates the Azure foundation; state and credentials remain private. | No resource names or state are published. |
+| Identity | GitHub Actions authenticates to Azure through OIDC. | No long-lived Azure credential is stored in repository secrets for delivery. |
+| Delivery | Immutable images are deployed with Helm; Kubernetes readiness and rollout status gate success. | This is an evidence deployment, not a claim of sustained production traffic. |
+| Telemetry | Prometheus, Grafana, Loki, Tempo, Alloy, OpenTelemetry Collector, and Alertmanager ran inside AKS. | Monitoring endpoints are private; no external paging receiver is claimed. |
+| Availability controls | Frontend/backend replicas, readiness probes, and a PodDisruptionBudget were exercised. | No multi-region HA or completed SLO observation window is claimed. |
 
-- **Keep FastAPI private:** the browser uses a Next.js proxy instead of reaching
-  the Python service directly.
-- **Use immutable image tags:** a production workload maps to a Git commit and a
-  concrete rollback target.
-- **Separate attempted from known-good:** deployment success requires smoke-test
-  evidence, not merely a running container.
-- **Keep telemetry close to the application for the MVP:** the single VM makes
-  the stack affordable and debuggable, while external availability monitoring is
-  the next independent failure domain.
-- **Do not fake horizontal scaling:** render rate-limit and concurrency state are
-  process-local, so the frontend remains single-replica until state is shared.
-- **Migrate in parallel:** AKS is built and tested beside the VM; DNS moves only
-  after observability and recovery gates pass.
+## Measured Recovery Evidence
 
-## Cloud-Native Migration Program
+| Exercise | Measurement | What it demonstrates |
+| --- | --- | --- |
+| Invalid backend readiness configuration | Detection: **370 s** · recovery: **383 s** | A rejected configuration is visible and the workload returns to Ready after rollback. |
+| Frontend Pod loss | Detection: **8 s** · recovery: **9 s** | A Deployment replaces a lost frontend Pod. |
+| Backend Pod loss | Detection: **7 s** · recovery: **14 s** | A Deployment replaces a lost backend Pod. |
+| Alert pipeline | Detection: **41 s** · clear: **345 s** | Prometheus-to-Alertmanager flow was observed internally. |
+| Workload-node drain | Drain completion: **15 s** · controlled recovery: **28 s** | A PDB-guarded planned-maintenance drain reschedules workloads. |
 
-The next program upgrades the project from a complete single-VM SRE baseline to
-verifiable cloud-native operations evidence:
+The final row is planned-maintenance timing, not incident MTTD/MTTR. The full
+method, timestamps, and caveats are in the [technical case study](docs/technical-case-study.md#6-measured-recovery-exercises).
 
-```text
-Helm + kind
-  -> Terraform remote state and Azure OIDC
-  -> ACR + Key Vault + AKS
-  -> Gateway API + TLS + atomic delivery
-  -> Kubernetes-native metrics, logs, and traces
-  -> bad-deploy, Pod-loss, and node-drain drills
-  -> measured MTTD and MTTR/RTO
-  -> parallel DNS cutover and observed rollback window
-```
+## Current Status
 
-Planned evidence includes Terraform plans, Helm releases, GitHub OIDC delivery,
-Kubernetes events, Prometheus queries, dashboard captures, and timestamped
-failure-drill reports. These remain labelled planned until the corresponding
-acceptance gates pass.
+| Implemented and evidenced | Intentionally not claimed yet |
+| --- | --- |
+| AKS foundation, OIDC delivery, Helm workloads, Kubernetes observability, and the recovery exercises above | AKS DNS cutover, trusted public TLS on AKS, external Slack/email/PagerDuty paging, SLO compliance, multi-region HA, or a completed Regular-VM migration |
+| Existing Docker Compose VM baseline and its original operational evidence | AKS teardown; the temporary environment is retained only until the evidence/cost decision is closed |
 
-## Technology
+## Good Interview Starting Points
+
+- Why use OIDC rather than a long-lived cloud credential in CI?
+- How would you distinguish a failed rollout from a healthy-but-slow service?
+- Why does a node drain need a PodDisruptionBudget and a post-drain health check?
+- What would be required before moving the public domain from the VM baseline to AKS?
+- Which observability claims are proven by screenshots and drills, and which need a longer production measurement window?
+
+For the architecture, implementation choices, exact drill scope, and remaining
+work, read the [technical case study](docs/technical-case-study.md).
+
+## Technology Snapshot
 
 | Layer | Technologies |
 | --- | --- |
-| Application | Next.js 15, React, TypeScript, FastAPI, Python 3.11 |
-| AI and vision | YOLOv8, OpenCV, Pillow, OpenAI Images |
-| Identity and data | Supabase Auth, Postgres, RLS, private Storage |
-| Current runtime | Docker, Docker Compose, Azure VM, HTTPS reverse proxy |
-| Delivery | GitHub Actions, immutable image tags, Docker Hub, smoke tests |
-| Observability | Prometheus, Grafana, Loki, Tempo, OpenTelemetry, Alloy, Alertmanager |
-| Planned platform | AKS, Terraform, Helm, kind, ACR, Key Vault, Workload Identity, Gateway API |
-
-## Current Limitations
-
-- Production still runs on an interruptible Spot VM.
-- The full signed-in cloud-save/render journey needs a recorded production
-  verification.
-- Backup/restore and measured failure drills are planned but not yet completed.
-- SLO/error-budget configuration is designed but not yet production-verified.
-- Frontend horizontal scaling requires shared render-control state.
-- AKS and Terraform are the next delivery phase, not a completed claim.
-
-## Interview Paths
-
-- Start with this README for the operating model and evidence summary.
-- Read the [technical case study](docs/technical-case-study.md) for the
-  architecture, failure model, and tradeoffs.
-- Open the Grafana evidence to discuss a concrete troubleshooting path.
-- Ask why the migration preserves the VM as a DNS rollback origin.
-- Ask which claims are implemented, externally verified, designed, or still
-  intentionally deferred.
+| Application | Next.js, React, TypeScript, FastAPI, Python, YOLOv8 |
+| Data and AI | Supabase Auth/Postgres/Storage, OpenAI Images |
+| Baseline runtime | Docker Compose, Azure VM, HTTPS reverse proxy |
+| Cloud-native evidence | AKS, Terraform, Helm, Azure Container Registry, Key Vault, Workload Identity, Gateway API |
+| Delivery | GitHub Actions, Azure OIDC, immutable image tags, rollout checks |
+| Observability | Prometheus, Grafana, Loki, Tempo, Alloy, OpenTelemetry, Alertmanager |
