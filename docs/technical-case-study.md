@@ -46,19 +46,28 @@ useful troubleshooting, while concentrating application, monitoring, and host
 failure in one place.
 
 ```mermaid
-flowchart TD
-    browser["Browser"] --> web["Next.js web entry point"]
-    web --> api["Private FastAPI + YOLOv8"]
+flowchart LR
+    browser["Browser"] --> proxy["HTTPS reverse proxy"]
+
+    subgraph vm["Current Azure Regular VM production runtime"]
+        proxy --> web["Next.js web entry point"]
+        web --> backend["Private FastAPI + YOLOv8"]
+
+        prom["Prometheus"] -->|scrapes metrics| web
+        prom -->|scrapes metrics| backend
+        web -->|container logs| alloy["Alloy"]
+        backend -->|container logs| alloy
+        alloy -->|forwards logs| loki["Loki"]
+        backend -->|OTLP traces| otel["OpenTelemetry Collector"]
+        otel --> tempo["Tempo"]
+        grafana["Grafana"] -->|queries| prom
+        grafana -->|queries| loki
+        grafana -->|queries| tempo
+        prom -->|alerts| alertmanager["Alertmanager"]
+    end
+
     web --> supabase["Supabase Auth / Postgres / Storage"]
     web --> openai["OpenAI Images"]
-
-    subgraph vm["Original Azure VM baseline"]
-        web
-        api
-        vmobs["Prometheus · Grafana · Loki · Tempo\nAlloy · OTel Collector · Alertmanager"]
-    end
-    web --> vmobs
-    api --> vmobs
 ```
 
 The system has commit-derived images, GitHub Actions quality gates, known-good
@@ -94,15 +103,24 @@ playbooks were tested.
 
 ```mermaid
 flowchart LR
-    dev["Git push / pull request"] --> gha["GitHub Actions"]
-    gha --> checks["Tests, build, scans, Terraform checks"]
-    gha --> oidc["Azure OIDC federation"]
-    oidc --> tf["Terraform: resource foundation"]
-    gha --> acr["Immutable application images"]
-    gha --> helm["Helm release + rollout checks"]
-    acr --> aks["AKS workloads"]
-    helm --> aks
-    kv["Key Vault + Workload Identity"] --> aks
+    pr["Pull request with\ninfrastructure changes"] --> plan["Terraform OIDC plan\nreview evidence"]
+    plan --> apply["Separately approved\nTerraform apply"]
+    apply --> foundation["Azure foundation\nAKS · network · ACR · Key Vault\nWorkload Identity · Gateway API profile"]
+
+    dispatch["Manual AKS evidence deployment\nselected revision + explicit confirmation"] --> checks["CI quality gates\nTests, build, scans"]
+    checks --> deploy
+    deploy --> oidc["Azure OIDC federation"]
+    oidc --> acr["Azure Container Registry"]
+    oidc --> credentials["Short-lived AKS credentials"]
+    deploy --> images["Build and lock\nimmutable application images"]
+    images --> acr
+    acr -->|image pull| workloads["AKS workloads"]
+    deploy --> helm["Helm release\nrollout and smoke checks"]
+    credentials --> helm
+    helm --> workloads
+    foundation -->|provides platform| workloads
+    foundation --> secrets["Key Vault + Workload Identity\nSecretProviderClass / CSI"]
+    secrets -->|secrets for Pods| workloads
 ```
 
 ### Infrastructure as code
@@ -130,31 +148,39 @@ visible early instead of failing after a partially applied release.
 
 ```mermaid
 flowchart TD
-    gateway["Gateway routing"] --> frontend["Next.js Deployment"]
-    frontend --> backend["Private FastAPI Deployment"]
-    frontend --> external["Supabase + OpenAI"]
-
     subgraph cluster["AKS evidence environment"]
+        gateway["Gateway API + HTTPRoute"] --> frontendSvc["Frontend Service"]
+        frontendSvc --> frontend["Next.js Deployment\n2 replicas + readiness"]
+        frontend --> backendSvc["Backend Service (ClusterIP)"]
+        backendSvc --> backend["Private FastAPI Deployment\n2 replicas + readiness"]
+
         frontend
         backend
-        pdb["Application PodDisruptionBudget"]
+        frontendPdb["Frontend PodDisruptionBudget"]
+        backendPdb["Backend PodDisruptionBudget"]
         prom["Prometheus"]
         grafana["Grafana"]
-        loki["Loki + Alloy"]
-        tempo["Tempo + OTel Collector"]
+        alloy["Alloy DaemonSet"]
+        loki["Loki"]
+        collector["OpenTelemetry Collector"]
+        tempo["Tempo"]
         am["Alertmanager"]
-        frontend --> prom
-        backend --> prom
-        frontend --> loki
-        backend --> loki
-        backend --> tempo
+        frontendPdb -. protects Pods .-> frontend
+        backendPdb -. protects Pods .-> backend
+        prom -->|scrapes metrics| frontendSvc
+        prom -->|scrapes metrics| backendSvc
+        frontend -->|container logs| alloy
+        backend -->|container logs| alloy
+        alloy -->|forwards logs| loki
+        backend -->|OTLP traces| collector
+        collector --> tempo
+        grafana -->|queries| prom
+        grafana -->|queries| loki
+        grafana -->|queries| tempo
+        prom -->|alerts| am
     end
-    prom --> grafana
-    loki --> grafana
-    tempo --> grafana
-    prom --> am
-    pdb -. protects .-> frontend
-    pdb -. protects .-> backend
+    frontend --> supabase["Supabase Auth / Postgres / Storage"]
+    frontend --> openai["OpenAI Images"]
 ```
 
 Frontend and backend ran with two replicas and readiness probes, so a
