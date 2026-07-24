@@ -12,7 +12,7 @@
 </p>
 
 <p>
-  <a href="https://theslowchrome.com">Product Demo</a> ·
+  <a href="https://theslowchrome.com">Live Application</a> ·
   <a href="#project-highlights">Project Highlights</a> ·
   <a href="docs/technical-case-study.md">Technical Case Study</a>
 </p>
