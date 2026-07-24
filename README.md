@@ -60,22 +60,20 @@ captures the current single-host operating model that motivated the parallel
 AKS work.
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph production["Current production runtime"]
         browser["Browser"] --> vm["Azure Regular VM\nNext.js + private FastAPI\nDocker Compose + observability"]
     end
 
     subgraph evidence["Separate AKS evidence environment (paused)"]
         direction TB
-        change["Infrastructure change"] --> plan["Terraform OIDC plan\nreviewed before apply"]
+        change["Infrastructure change"] --> plan["Terraform OIDC plan\nreviewed → approved apply"]
         plan --> foundation["Terraform-managed\nAzure foundation"]
         manual["Manual AKS deployment\nexplicit confirmation"] --> delivery["GitHub Actions\nquality gate + Azure OIDC"]
         delivery --> release["Immutable ACR images\nHelm release + checks"]
-        foundation --> aks["AKS workloads\nFrontend + private backend\nobservability + resilience drills"]
+        foundation --> aks["AKS workloads\nFrontend + private backend\nKubernetes observability"]
         release --> aks
     end
-
-    vm -. "parallel evidence only\nno public AKS traffic" .-> aks
 ```
 
 The value of this work is a concrete operating chain: infrastructure definition,
