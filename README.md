@@ -14,7 +14,6 @@
 <p>
   <a href="https://theslowchrome.com">Product Demo</a> ·
   <a href="#project-highlights">Project Highlights</a> ·
-  <a href="#evidence-gallery">Evidence Gallery</a> ·
   <a href="docs/technical-case-study.md">Technical Case Study</a>
 </p>
 
@@ -38,8 +37,8 @@ that operational work; it is not a mirror of the private application source.
 
 | What I built | Why it matters | Evidence to inspect |
 | --- | --- | --- |
-| Terraform-managed Azure foundation | Infrastructure changes are reviewable and repeatable rather than console-only. | [Technical architecture](docs/technical-case-study.md#3-aks-foundation-and-delivery) |
-| GitHub Actions → Azure OIDC → AKS delivery | CI can deploy immutable images without storing a long-lived Azure secret in GitHub. | [Delivery flow](docs/technical-case-study.md#3-aks-foundation-and-delivery) |
+| Terraform-managed Azure foundation | Infrastructure changes are reviewable and repeatable rather than console-only. | [Infrastructure as code](docs/technical-case-study.md#infrastructure-as-code) |
+| GitHub Actions → Azure OIDC → AKS delivery | CI can deploy immutable images without storing a long-lived Azure secret in GitHub. | [CI/CD identity and release path](docs/technical-case-study.md#cicd-identity-and-release-path) |
 | Helm-managed frontend and private backend | The application is deployed as Kubernetes workloads with explicit rollout and rollback behavior. | [AKS topology](docs/technical-case-study.md#4-aks-runtime-topology) |
 | Metrics, logs, traces, dashboards, and alerts | Diagnosis is based on correlated operational signals instead of SSH-only debugging. | [Observability](docs/technical-case-study.md#5-kubernetes-observability) |
 | Recovery and resilience drills | A bad configuration, Pod loss, internal alert-pipeline flow, and planned node maintenance were tested with timestamps. | [Recovery evidence](docs/technical-case-study.md#6-measured-recovery-exercises) |
@@ -86,13 +85,13 @@ recovery.
 
 ## What Was Built and Verified
 
-| Capability | What was verified | Scope |
-| --- | --- | --- |
-| Infrastructure foundation | Terraform created the Azure foundation for the evidence environment; state and credentials remained private. | No resource names or state are published. |
-| Delivery identity | GitHub Actions authenticated to Azure through OIDC. | No long-lived Azure delivery credential was required in CI. |
-| Release safety | Immutable images were released with Helm, readiness checks, rollout checks, and rollback behavior. | This validates an evidence deployment, not sustained public AKS traffic. |
-| Observability | Prometheus, Grafana, Loki, Tempo, Alloy, OpenTelemetry Collector, and Alertmanager ran inside AKS. | Monitoring endpoints remained private; no external paging receiver is claimed. |
-| Availability controls | Frontend/backend replicas, readiness probes, and a PodDisruptionBudget were exercised. | No multi-region HA or completed SLO observation window is claimed. |
+| Capability | What was verified |
+| --- | --- |
+| Infrastructure foundation | Terraform created the Azure foundation for the evidence environment; state and credentials remained private. |
+| Delivery identity | GitHub Actions authenticated to Azure through OIDC without requiring a long-lived Azure delivery credential in CI. |
+| Release safety | Immutable images were released with Helm, readiness checks, rollout checks, and rollback behavior. |
+| Observability | Prometheus, Grafana, Loki, Tempo, Alloy, OpenTelemetry Collector, and Alertmanager ran inside AKS. |
+| Availability controls | Frontend/backend replicas, readiness probes, and a PodDisruptionBudget were exercised. |
 
 ## Recovery and Resilience Drills
 
@@ -110,16 +109,6 @@ incidents or SLO measurements.
 
 The final row is planned-maintenance timing, not incident MTTD/MTTR. The full
 method, timestamps, and caveats are in the [technical case study](docs/technical-case-study.md#6-measured-recovery-exercises).
-
-## Evidence Gallery
-
-These static, sanitized screenshots of private operations surfaces contain no
-credentials, user data, cluster identifiers, IP addresses, or raw logs.
-
-| Evidence | What it shows |
-| --- | --- |
-| ![AKS Grafana overview](assets/aks-observability-dashboard.png) | The AKS observability overview after the monitoring stack and application signals became healthy. |
-| ![AKS operational signals](assets/aks-observability-signals.png) | Kubernetes and application signals used during the recovery drills. |
 
 ## Scope and Current State
 
