@@ -74,6 +74,8 @@ flowchart LR
         foundation --> aks["AKS workloads\nFrontend + private backend\nKubernetes observability"]
         release --> aks
     end
+
+    vm ~~~ change
 ```
 
 The value of this work is a concrete operating chain: infrastructure definition,
