@@ -56,27 +56,26 @@ evidence and lifecycle decision are closed. This Showcase does **not** claim a
 DNS cutover, sustained public AKS traffic, or that the VM has been retired.
 
 The [VM observability baseline](assets/grafana-observability-preview.png)
-captures the original single-host operating model that motivated the parallel
+captures the current single-host operating model that motivated the parallel
 AKS work.
 
 ```mermaid
-flowchart LR
-    user["Browser"] --> vm["Existing Azure VM baseline\nNext.js + private FastAPI\nDocker Compose"]
-
-    subgraph delivery["Cloud-native evidence path"]
-        gha["GitHub Actions"] --> oidc["Azure OIDC"]
-        oidc --> tf["Terraform-managed Azure foundation"]
-        gha --> images["Immutable container images"]
-        images --> helm["Helm release"]
+flowchart TB
+    subgraph production["Current production runtime"]
+        browser["Browser"] --> vm["Azure Regular VM\nNext.js + private FastAPI\nDocker Compose + observability"]
     end
 
-    subgraph aks["Temporary AKS evidence environment"]
-        helm --> web["Next.js Deployment"]
-        web --> api["Private FastAPI Deployment"]
-        obs["Prometheus · Loki · Tempo\nGrafana · Alertmanager"]
-        web --> obs
-        api --> obs
+    subgraph evidence["Separate AKS evidence environment (paused)"]
+        direction TB
+        change["Infrastructure change"] --> plan["Terraform OIDC plan\nreviewed before apply"]
+        plan --> foundation["Terraform-managed\nAzure foundation"]
+        manual["Manual AKS deployment\nexplicit confirmation"] --> delivery["GitHub Actions\nquality gate + Azure OIDC"]
+        delivery --> release["Immutable ACR images\nHelm release + checks"]
+        foundation --> aks["AKS workloads\nFrontend + private backend\nobservability + resilience drills"]
+        release --> aks
     end
+
+    vm -. "parallel evidence only\nno public AKS traffic" .-> aks
 ```
 
 The value of this work is a concrete operating chain: infrastructure definition,
