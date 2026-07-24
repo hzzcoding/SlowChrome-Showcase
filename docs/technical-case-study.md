@@ -1,31 +1,36 @@
 # SlowChrome: From a Single VM Baseline to AKS Operations Evidence
 
 This case study documents the operational evolution of SlowChrome, an
-AI-assisted motorcycle customization application. It is deliberately
-evidence-led: a capability is described as implemented only when there is a
-corresponding deployment, readiness check, drill record, or sanitized artifact.
+AI-assisted motorcycle customization application. SlowChrome currently serves
+its public application from an Azure Regular VM. The case study covers the move
+to that stable production baseline and a separate, time-boxed AKS evidence
+environment used to build and validate cloud-native delivery, observability,
+and recovery practices.
+
+It is deliberately evidence-led: a capability is described as implemented only
+when there is a corresponding deployment, readiness check, controlled drill, or
+sanitized artifact.
 
 Read the [portfolio overview](../README.md) for the recruiter-facing version.
 
-> **Scope boundary:** the Azure VM was the original application baseline. The
-> AKS environment was deployed and exercised in parallel as a time-boxed
-> cloud-native evidence environment. This is not a claim that public DNS was
-> cut over to AKS, that AKS served sustained production traffic, or that the VM
-> was permanently retired.
+> **Scope:** AKS was deployed and exercised in parallel, but did not receive
+> public production traffic. The current operating decision is to keep the
+> application on the Regular VM, whose cost and operational profile better fit
+> its present needs. AKS is paused as documented operations evidence, not as a
+> pending public cutover.
 
 ## Executive Summary
 
 | Area | Evidence | Status |
 | --- | --- | --- |
-| Product baseline | Next.js web app, private FastAPI/YOLO service, Supabase, and OpenAI Images on an Azure VM with Docker Compose | Implemented baseline |
-| Infrastructure | Terraform-managed Azure foundation for the AKS environment | Implemented and exercised |
-| Delivery identity | GitHub Actions authenticates to Azure with OIDC and deploys immutable images through Helm | Implemented and exercised |
-| AKS runtime | Frontend and backend Deployments, readiness probes, PDB protection, and Gateway-based routing | Implemented and exercised |
-| Observability | Prometheus, Grafana, Loki, Tempo, Alloy, OpenTelemetry Collector, and Alertmanager | Implemented and exercised |
-| Recovery | Bad-readiness, Pod-loss, alert-pipeline, and node-drain exercises with recorded timestamps | Implemented and measured |
-| Long-term production decision | DNS cutover, externally reachable TLS, paging integration, SLO window, Regular VM migration, and AKS teardown | Not claimed / separate work |
+| Current production runtime | Public application runs on an Azure Regular VM with Docker Compose and the VM observability stack | Current production |
+| AKS foundation | Terraform-managed Azure foundation for the evidence environment | Implemented and exercised |
+| AKS delivery | GitHub Actions authenticates to Azure with OIDC and deploys immutable images through Helm | Implemented and exercised |
+| AKS operations | Frontend/backend Deployments, readiness probes, observability, and controlled resilience drills | Implemented and exercised |
+| Operating decision | The Regular VM remains the proportionate long-term runtime for current product needs | Decided |
+| AKS lifecycle | Any return to service or teardown requires a separate cost and lifecycle decision | Deferred |
 
-## 1. Product and Original Operational Boundary
+## 1. Product and Current Production Boundary
 
 SlowChrome lets a user upload a motorcycle image, validate whether the image is
 suitable, configure a future build, request a bounded AI render, and save
@@ -34,10 +39,10 @@ YOLOv8 remain private behind server-side routes. Supabase provides identity,
 Postgres, Row Level Security, and private object storage. OpenAI credentials
 stay server-side.
 
-The first runtime was intentionally small and understandable: Docker Compose on
-an Azure Spot VM, with the application and an observability stack on the same
-host. It allowed fast iteration, immutable image releases, and useful
-troubleshooting, but it also concentrated application, monitoring, and host
+The current public runtime is intentionally small and understandable: Docker
+Compose on an Azure Regular VM, with the application and an observability stack
+on the same host. It supports fast iteration, immutable image releases, and
+useful troubleshooting, while concentrating application, monitoring, and host
 failure in one place.
 
 ```mermaid
@@ -56,26 +61,34 @@ flowchart TD
     api --> vmobs
 ```
 
-The system already had commit-derived images, GitHub Actions quality gates,
-known-good deployment recovery, and private Grafana access. The cloud-native
-phase was designed to add a separate operational control plane and to prove the
-failure behavior that a single machine cannot demonstrate.
+The system has commit-derived images, GitHub Actions quality gates, known-good
+deployment recovery, and private Grafana access. The AKS work did not replace
+the production VM; it created a separate operating environment for validating
+managed Kubernetes delivery and failure behavior.
 
 ## 2. Why AKS Was a Parallel Evidence Environment
 
-The AKS work was not a “convert Compose YAML to Kubernetes YAML” exercise. Its
-purpose was to create inspectable evidence for a cloud-native operating model:
+The AKS work was not a “convert Compose YAML to Kubernetes YAML” exercise.
+Local Kubernetes practice began in Minikube, where manifests, Helm behavior,
+and failure scenarios could be explored without cloud cost. The short AKS
+window then validated the operating model against managed Azure services: cloud
+identity, container-registry access, Gateway routing, managed node pools,
+observability, and cost-aware lifecycle decisions.
+
+Its purpose was to create inspectable evidence for a cloud-native operating
+model:
 
 - infrastructure can be recreated from Terraform rather than console steps;
 - CI can use short-lived cloud identity instead of a stored Azure secret;
 - the application can be delivered as immutable Helm releases;
 - logs, metrics, traces, dashboards, and alert flow work inside Kubernetes; and
-- workload failures and planned node maintenance have measured outcomes.
+- workload failures and planned node maintenance can be exercised in a managed
+  cluster.
 
-Keeping the original VM as the baseline avoided conflating this evidence work
-with a public cutover. It also preserved a simple known-good reference while
-the AKS configuration, cluster permissions, observability components, and
-recovery playbooks were tested.
+Keeping the Regular VM in production avoided conflating this evidence work with
+a public cutover. It preserved a known-good production reference while AKS
+configuration, cluster permissions, observability components, and recovery
+playbooks were tested.
 
 ## 3. AKS Foundation and Delivery
 
@@ -144,24 +157,25 @@ flowchart TD
     pdb -. protects .-> backend
 ```
 
-The frontend and backend run as Kubernetes Deployments with readiness checks.
-The backend remains private behind the frontend route boundary. The application
-PodDisruptionBudget was verified before the node-drain exercise with one
-voluntary disruption allowed; this makes planned maintenance an intentional
-availability action rather than an unbounded eviction.
+Frontend and backend ran with two replicas and readiness probes, so a
+replacement Pod had to become Ready before it could serve traffic. The backend
+remained private behind the frontend route boundary. Before the planned
+node-drain exercise, the PodDisruptionBudget was verified to allow at most one
+voluntary disruption at a time, reducing the chance that routine maintenance
+would evict both replicas together.
 
 ## 5. Kubernetes Observability
 
 The AKS observability stack used five Helm releases and the following
 components:
 
-| Signal | Components | Question answered |
+| Signal | Components | Operational use |
 | --- | --- | --- |
-| Metrics | Prometheus and Kubernetes/application exporters | Are workload health, errors, latency, and resource conditions changing? |
-| Logs | Alloy and Loki | Which service or rollout emitted the relevant event? |
-| Traces | OpenTelemetry Collector and Tempo | Where did a request spend time or fail? |
-| Dashboards | Grafana | Can an operator correlate application, Pod, and cluster signals? |
-| Alerts | Prometheus rules and Alertmanager | Did an alert rule transition and clear through the internal alert path? |
+| Metrics | Prometheus and Kubernetes/application exporters | Track workload health, errors, latency, and resource conditions. |
+| Logs | Alloy and Loki | Investigate events from a service or rollout. |
+| Traces | OpenTelemetry Collector and Tempo | Follow request paths through the application. |
+| Dashboards | Grafana | View application, Pod, and cluster signals together. |
+| Alerts | Prometheus rules and Alertmanager | Evaluate and route internal alert state changes. |
 
 Prometheus, Loki, and Tempo each use bounded persistent storage (8 Gi, 8 Gi,
 and 5 Gi respectively). Their services are `ClusterIP`; the observability
@@ -170,11 +184,12 @@ and cost while keeping the stack useful for an evidence environment.
 
 ### Evidence snapshots
 
-![AKS Grafana overview](../assets/aks-observability-dashboard.png)
-
 ![AKS operational signals](../assets/aks-observability-signals.png)
 
-The screenshots are static and sanitized. They are proof of the monitoring
+*AKS operations dashboard showing replica availability, restarts, application
+resource use, scrape health, readiness, and autoscaling signals.*
+
+The screenshot is static and sanitized. It demonstrates the monitoring
 surface, not a substitute for a public Grafana endpoint or an external
 availability monitor.
 
@@ -192,30 +207,23 @@ These are small configuration details with large operational effects: a green
 Pod does not prove that telemetry is useful until the signals are discoverable,
 queryable, and tied to the workload being changed.
 
-## 6. Measured Recovery Exercises
+## 6. Recovery and Resilience Drills
 
-Every measurement below is scoped to a controlled exercise in the AKS evidence
-environment. It is not an SLO report and should not be generalized to a
-long-running production workload.
+To validate how the AKS operating model behaved under controlled disruption, I
+ran drills covering invalid readiness configuration, Pod replacement, internal
+alert flow, and planned node maintenance. These drills validate Kubernetes and
+Helm recovery behavior after a controlled trigger; they are not production
+incidents or operator-response measurements.
 
-| Exercise | Detection | Recovery / completion | Scope and interpretation |
-| --- | ---: | ---: | --- |
-| Invalid backend readiness configuration | 370 s | 383 s | A deliberately invalid readiness setting was surfaced, then rolled back until the backend became Ready. |
-| Frontend Pod loss | 8 s | 9 s | A frontend Pod was removed; its Deployment restored desired state. |
-| Backend Pod loss | 7 s | 14 s | A backend Pod was removed; its Deployment restored desired state. |
-| Alert pipeline | 41 s | 345 s | A Prometheus rule transitioned through Alertmanager and cleared. The receiver was internal Alertmanager only—no email, Slack, or PagerDuty notification is claimed. |
-| Workload-node drain | — | 15 s drain completion; 28 s controlled recovery | Planned maintenance with the PDB verified before and workload nodes returning to three afterward. This is not incident MTTD/MTTR. |
+| Drill | What was validated |
+| --- | --- |
+| Invalid backend readiness configuration | Helm rejected the invalid rollout and restored the known-good backend revision. |
+| Frontend Pod loss | A controlled Pod deletion triggered Deployment self-healing; frontend capacity and external health were restored. |
+| Backend Pod loss | A controlled Pod deletion triggered Deployment self-healing; backend readiness and external health were restored. |
+| Internal alert flow | A Prometheus rule transitioned through Alertmanager and later cleared. |
+| Planned workload-node drain | A PDB-aware drain rescheduled workloads and restored the expected healthy application state. |
 
-In the recorded node-drain timeline, the drain began at `03:25:24Z`, completed
-at `03:25:39Z`, and the workload recovered at `03:25:52Z`. Frontend and backend
-replicas were 2/2 Ready afterward; all 16 observability components were Ready;
-no workload node remained cordoned; and the PDB reported no events.
-
-The key distinction is language: a node drain is a controlled maintenance
-operation. “Drain completion” and “controlled maintenance recovery” accurately
-describe the measured outcome; calling it a detected incident would not.
-
-## 7. Security and Cost Boundaries
+## 7. Security and Cost Decisions
 
 | Boundary | Control / decision |
 | --- | --- |
@@ -223,31 +231,12 @@ describe the measured outcome; calling it a detected incident would not.
 | Application secrets | Azure Key Vault and workload identity are used without publishing values in this repository. |
 | Network exposure | Backend and observability components are not documented as public endpoints. |
 | Portfolio safety | No source code, Terraform state, kubeconfig, raw logs, IDs, IPs, tokens, or user data are included. |
-| Cost control | The AKS environment is time-boxed. The short observability evidence window was estimated at roughly US$0.40 incremental cost; it is not presented as a long-term production bill. |
+| Cost and lifecycle | AKS was time-boxed and paused after the evidence window; the Regular VM avoids operating managed Kubernetes capacity that current product needs do not justify. |
 
-## 8. What Remains Before a Permanent Cutover
+## 8. Current Operating Decision
 
-The project intentionally leaves these as separate decisions rather than
-implying completion:
-
-1. choose the long-term Regular VM or AKS runtime based on cost and operational
-   needs;
-2. if AKS becomes permanent, establish trusted public TLS and a controlled DNS
-   cutover/rollback plan;
-3. connect Alertmanager to an external notification receiver;
-4. operate an SLO/SLI observation window before making availability claims;
-5. complete backup/restore and broader failure testing; and
-6. explicitly approve and execute AKS teardown once the evidence window closes.
-
-## 9. Interview Discussion Guide
-
-- Explain why a short-lived OIDC token is safer for CI than a stored cloud
-  secret, and what RBAC it still requires.
-- Walk through a failed Helm rollout: readiness signal, Kubernetes event/log
-  checks, rollback, and post-recovery verification.
-- Contrast application recovery after a Pod deletion with controlled node
-  maintenance under a PodDisruptionBudget.
-- Describe why ClusterIP-only observability is a security boundary, and what
-  additional work is needed for independent external detection.
-- Discuss the tradeoff between a cost-efficient VM baseline and a temporary AKS
-  environment that provides cloud-native operating evidence.
+SlowChrome currently runs on the Azure Regular VM. The AKS work remains
+documented as a cloud-native operations exercise, not as a pending production
+cutover. If product scale, availability requirements, or team operating needs
+change, AKS can be reconsidered through a new cost, reliability, and migration
+review.

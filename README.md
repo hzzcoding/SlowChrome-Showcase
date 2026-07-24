@@ -41,11 +41,11 @@ that operational work; it is not a mirror of the private application source.
 | GitHub Actions → Azure OIDC → AKS delivery | CI can deploy immutable images without storing a long-lived Azure secret in GitHub. | [CI/CD identity and release path](docs/technical-case-study.md#cicd-identity-and-release-path) |
 | Helm-managed frontend and private backend | The application is deployed as Kubernetes workloads with explicit rollout and rollback behavior. | [AKS topology](docs/technical-case-study.md#4-aks-runtime-topology) |
 | Metrics, logs, traces, dashboards, and alerts | Diagnosis is based on correlated operational signals instead of SSH-only debugging. | [Observability](docs/technical-case-study.md#5-kubernetes-observability) |
-| Recovery and resilience drills | A bad configuration, Pod loss, internal alert-pipeline flow, and planned node maintenance were tested with timestamps. | [Recovery evidence](docs/technical-case-study.md#6-measured-recovery-exercises) |
+| Recovery and resilience drills | A bad configuration, Pod loss, internal alert flow, and planned node maintenance were exercised in a managed cluster. | [Recovery evidence](docs/technical-case-study.md#6-recovery-and-resilience-drills) |
 
 ## From VM Baseline to an AKS Evidence Environment
 
-The Azure VM remains the original application baseline. AKS ran beside it as a
+The Azure Regular VM is the current production runtime. AKS ran beside it as a
 real, time-boxed environment for building and validating cloud-native delivery,
 observability, and recovery practices—not as an immediate public migration.
 
@@ -80,8 +80,8 @@ flowchart LR
 ```
 
 The value of this work is a concrete operating chain: infrastructure definition,
-delivery identity, workload health, telemetry, controlled failure, and measured
-recovery.
+delivery identity, workload health, telemetry, controlled failure, and recovery
+validation.
 
 ## What Was Built and Verified
 
@@ -95,27 +95,27 @@ recovery.
 
 ## Recovery and Resilience Drills
 
-These were intentional, scoped exercises in the AKS evidence environment to
-validate detection and recovery behavior. They are not user-facing production
-incidents or SLO measurements.
+These were intentional, scoped exercises in the AKS evidence environment. They
+validate Kubernetes and Helm recovery behavior after a controlled trigger; they
+are not user-facing production incidents, SLO measurements, or
+operator-response measurements.
 
-| Exercise | Measurement | What it demonstrates |
-| --- | --- | --- |
-| Invalid backend readiness configuration | Detection: **370 s** · recovery: **383 s** | A rejected configuration is visible and the workload returns to Ready after rollback. |
-| Frontend Pod loss | Detection: **8 s** · recovery: **9 s** | A Deployment replaces a lost frontend Pod. |
-| Backend Pod loss | Detection: **7 s** · recovery: **14 s** | A Deployment replaces a lost backend Pod. |
-| Alert pipeline | Detection: **41 s** · clear: **345 s** | Prometheus-to-Alertmanager flow was observed internally. |
-| Workload-node drain | Drain completion: **15 s** · controlled recovery: **28 s** | A PDB-guarded planned-maintenance drain reschedules workloads. |
+| Exercise | What it demonstrates |
+| --- | --- |
+| Invalid backend readiness configuration | Helm rejects an invalid rollout and restores the known-good backend revision. |
+| Frontend Pod loss | A Deployment replaces a deliberately removed frontend Pod. |
+| Backend Pod loss | A Deployment replaces a deliberately removed backend Pod. |
+| Internal alert flow | Prometheus-to-Alertmanager flow transitions and clears internally. |
+| Workload-node drain | A PDB-aware planned-maintenance drain reschedules workloads and restores the expected healthy state. |
 
-The final row is planned-maintenance timing, not incident MTTD/MTTR. The full
-method, timestamps, and caveats are in the [technical case study](docs/technical-case-study.md#6-measured-recovery-exercises).
+The full drill scope and caveats are in the [technical case study](docs/technical-case-study.md#6-recovery-and-resilience-drills).
 
 ## Scope and Current State
 
 | Verified | Not claimed or intentionally deferred |
 | --- | --- |
-| AKS foundation, OIDC delivery, Helm workloads, Kubernetes observability, and the recovery drills above | AKS DNS cutover, trusted public TLS on AKS, external Slack/email/PagerDuty paging, SLO compliance, multi-region HA, or a completed VM migration |
-| The original Docker Compose VM baseline and its operational evidence | AKS remains paused; its teardown or any return to service requires a separate lifecycle and cost decision |
+| Current production on the Azure Regular VM; AKS foundation, OIDC delivery, Helm workloads, Kubernetes observability, and the recovery drills above | AKS DNS cutover, trusted public TLS on AKS, external Slack/email/PagerDuty paging, SLO compliance, or multi-region HA |
+| Docker Compose VM baseline and its operational evidence | AKS remains paused; its teardown or any return to service requires a separate lifecycle and cost decision |
 
 For the architecture, implementation choices, exact drill scope, and remaining
 work, read the [technical case study](docs/technical-case-study.md).
