@@ -52,22 +52,13 @@ The [VM observability baseline](assets/grafana-observability-preview.png)
 captures the current single-host operating model that motivated the parallel
 AKS work.
 
-```mermaid
-flowchart LR
-    subgraph production["Current production runtime"]
-        browser["Browser"] --> vm["Azure Regular VM\nDocker Compose application\nVM observability"]
-    end
-
-    subgraph evidence["Separate AKS evidence environment (paused)"]
-        direction TB
-        foundation["Terraform-managed foundation\nreviewed plan + approved apply"]
-        delivery["Manual GitHub Actions delivery\nquality gate · Azure OIDC\nimmutable images · Helm checks"]
-        foundation --> aks["AKS evidence environment\nfrontend + private backend\nKubernetes observability\ncontrolled drills"]
-        delivery --> aks
-    end
-
-    vm ~~~ foundation
-```
+| Dimension | Current production: Azure Regular VM | AKS evidence environment: paused |
+| --- | --- | --- |
+| Public traffic | Serves the public application at `theslowchrome.com`. | Does not receive public DNS or sustained public traffic. |
+| Infrastructure | The VM network security group is managed with Terraform; the application runs with Docker Compose. | Terraform manages the AKS foundation: network, AKS, ACR, Key Vault, workload identity, and the Gateway API profile. |
+| Release path | A push to `main` runs quality gates, builds Docker Hub images, and deploys through a self-hosted runner with Docker Compose, smoke tests, and recovery behavior. | An explicitly confirmed manual workflow runs quality gates, uses Azure OIDC, builds or reuses immutable ACR images, and releases through Helm. |
+| Runtime and operations | Next.js, private FastAPI, and the VM observability stack run on one host. | Frontend/backend Kubernetes workloads, Kubernetes observability, and controlled resilience drills were exercised. |
+| Current decision | Proportionate long-term runtime for the product's present needs. | Time-boxed operations environment; paused pending a separate lifecycle and cost decision. |
 
 ## Recovery and Resilience Drills
 
