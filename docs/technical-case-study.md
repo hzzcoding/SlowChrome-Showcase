@@ -125,24 +125,25 @@ flowchart LR
 
 ### Infrastructure as code
 
-Terraform manages the Azure foundation used by the evidence environment,
-including the AKS dependency chain and its deployment prerequisites. State,
-resource names, subscription information, and provider configuration are
-private. Terraform plans were produced and reviewed before applies; this is
-important because the plan is the change contract, not merely a deployment
-command.
+Terraform defined the Azure foundation for the AKS evidence environment:
+network dependencies, AKS, Azure Container Registry, Key Vault, workload
+identity, and the Gateway API profile. Infrastructure changes began with an
+OIDC-backed Terraform plan on a pull request and proceeded only through a
+separately approved apply. State, resource names, subscription information, and
+provider configuration remain private.
 
 ### CI/CD identity and release path
 
-GitHub Actions uses Azure OIDC federation for delivery. That replaces a
-long-lived Azure client secret in CI with short-lived workload identity. The
-workflow builds immutable frontend/backend images, publishes them to the
-registry, and uses Helm to release a specific version to AKS. Kubernetes
-readiness and rollout status are checked as deployment evidence.
+AKS deployment was deliberately manual: a workflow dispatch required explicit
+confirmation before it could change the evidence environment. It first ran the
+project quality gate, then used GitHub OIDC to sign in to Azure, built and
+locked immutable frontend and backend images in ACR, obtained short-lived AKS
+credentials, and released the selected image version through Helm. Rollout and
+smoke checks verified the release path before it was treated as successful.
 
-The release path was also hardened with namespace-scoped delivery permissions
-and a CRD permission preflight. Those changes made failed setup/recovery paths
-visible early instead of failing after a partially applied release.
+The delivery workflow used namespace-scoped permissions and a CRD permission
+preflight, so missing access or setup was surfaced before a partially applied
+release became an operational problem.
 
 ## 4. AKS Runtime Topology
 
@@ -208,38 +209,36 @@ and 5 Gi respectively). Their services are `ClusterIP`; the observability
 interfaces are not presented as public endpoints. This choice limits exposure
 and cost while keeping the stack useful for an evidence environment.
 
-### Evidence snapshots
+### Dashboard snapshot
 
 ![AKS operational signals](../assets/aks-observability-signals.png)
 
 *AKS operations dashboard showing replica availability, restarts, application
 resource use, scrape health, readiness, and autoscaling signals.*
 
-The screenshot is static and sanitized. It demonstrates the monitoring
-surface, not a substitute for a public Grafana endpoint or an external
-availability monitor.
+### Operational integration notes
 
-### Integration lessons
+Several implementation details had to be resolved before the stack became
+useful for operations:
 
-Several issues were found and resolved while connecting the stack:
+- Prometheus discovery selectors had to match the application labels actually
+  applied by the Helm chart;
+- OpenTelemetry and Loki integration required an explicit configuration
+  contract rather than chart defaults alone; and
+- non-root Alloy required writable state plus a ConfigMap checksum so its
+  configuration changes reliably caused rollout.
 
-- an unsupported top-level OpenTelemetry metrics setting had to be removed;
-- Prometheus discovery selectors had to match the actual application labels;
-- Loki sidecar behavior needed an explicit integration contract; and
-- non-root Alloy required writable state plus a ConfigMap checksum so config
-  changes reliably caused rollout.
-
-These are small configuration details with large operational effects: a green
-Pod does not prove that telemetry is useful until the signals are discoverable,
-queryable, and tied to the workload being changed.
+These details turned installed components into usable signals: a green Pod does
+not prove that telemetry is discoverable, queryable, and tied to the workload
+being changed.
 
 ## 6. Recovery and Resilience Drills
 
 To validate how the AKS operating model behaved under controlled disruption, I
 ran drills covering invalid readiness configuration, Pod replacement, internal
-alert flow, and planned node maintenance. These drills validate Kubernetes and
-Helm recovery behavior after a controlled trigger; they are not production
-incidents or operator-response measurements.
+alert flow, and planned node maintenance. They show automated platform behavior
+after controlled triggers, not production incidents or manual incident-response
+exercises.
 
 | Drill | What was validated |
 | --- | --- |
