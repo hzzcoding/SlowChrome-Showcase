@@ -1,53 +1,33 @@
-# SlowChrome: From a Single VM Baseline to AKS Operations Evidence
+# SlowChrome: Operating a Product MVP on Azure and Exercising AKS
 
-This case study documents the operational evolution of SlowChrome, an
-AI-assisted motorcycle customization application. SlowChrome currently serves
-its public application from an Azure Regular VM. The case study covers the move
-to that stable production baseline and a separate, time-boxed AKS evidence
-environment used to build and validate cloud-native delivery, observability,
-and recovery practices.
+SlowChrome’s public product currently runs on an Azure Regular VM. This case
+study explains that production operating model and a separate, time-boxed AKS
+environment used to practice and validate cloud-native delivery, observability,
+and resilience workflows.
 
-It is deliberately evidence-led: a capability is described as implemented only
-when there is a corresponding deployment, readiness check, controlled drill, or
-sanitized artifact.
+It focuses on the engineering choices behind both environments: how they were
+delivered, operated, observed, and deliberately bounded. The AKS environment
+was exercised in parallel, did not receive public production traffic, and is
+now paused while the Regular VM remains the current product runtime.
 
-Read the [portfolio overview](../README.md) for the recruiter-facing version.
+## 1. Current Production Architecture
 
-> **Scope:** AKS was deployed and exercised in parallel, but did not receive
-> public production traffic. The current operating decision is to keep the
-> application on the Regular VM, whose cost and operational profile better fit
-> its present needs. AKS is paused as documented operations evidence, not as a
-> pending public cutover.
-
-## Executive Summary
-
-| Area | Evidence | Status |
-| --- | --- | --- |
-| Current production runtime | Public application runs on an Azure Regular VM with Docker Compose and the VM observability stack | Current production |
-| AKS foundation | Terraform-managed Azure foundation for the evidence environment | Implemented and exercised |
-| AKS delivery | GitHub Actions authenticates to Azure with OIDC and deploys immutable images through Helm | Implemented and exercised |
-| AKS operations | Frontend/backend Deployments, readiness probes, observability, and controlled resilience drills | Implemented and exercised |
-| Operating decision | The Regular VM remains the proportionate long-term runtime for current product needs | Decided |
-| AKS lifecycle | Any return to service or teardown requires a separate cost and lifecycle decision | Deferred |
-
-## 1. Product and Current Production Boundary
-
-SlowChrome lets a user upload a motorcycle image, validate whether the image is
+SlowChrome lets riders upload a motorcycle image, validate whether it is
 suitable, configure a future build, request a bounded AI render, and save
-user-owned state. The browser talks to a Next.js application; FastAPI and
-YOLOv8 remain private behind server-side routes. Supabase provides identity,
-Postgres, Row Level Security, and private object storage. OpenAI credentials
-stay server-side.
+user-owned state. The browser reaches the Next.js application through Caddy;
+FastAPI and YOLOv8 remain private behind server-side routes. Supabase provides
+identity, Postgres, Row Level Security, and private object storage. OpenAI
+credentials stay server-side.
 
 The current public runtime is intentionally small and understandable: Docker
-Compose on an Azure Regular VM, with the application and an observability stack
-on the same host. It supports fast iteration, immutable image releases, and
-useful troubleshooting, while concentrating application, monitoring, and host
-failure in one place.
+Compose on an Azure Regular VM, with the application and observability stack on
+the same host. It supports fast iteration, immutable image releases, and useful
+troubleshooting, while concentrating application, monitoring, and host failure
+in one place.
 
 ```mermaid
 flowchart LR
-    browser["Browser"] --> proxy["HTTPS reverse proxy"]
+    browser["Browser"] --> proxy["Caddy HTTPS reverse proxy"]
 
     subgraph vm["Current Azure Regular VM production runtime"]
         proxy --> web["Next.js web entry point"]
@@ -55,6 +35,8 @@ flowchart LR
 
         prom["Prometheus"] -->|scrapes metrics| web
         prom -->|scrapes metrics| backend
+        prom -->|scrapes metrics| node["node-exporter"]
+        prom -->|scrapes metrics| cadvisor["cAdvisor"]
         web -->|container logs| alloy["Alloy"]
         backend -->|container logs| alloy
         alloy -->|forwards logs| loki["Loki"]
@@ -63,19 +45,24 @@ flowchart LR
         grafana["Grafana"] -->|queries| prom
         grafana -->|queries| loki
         grafana -->|queries| tempo
-        prom -->|alerts| alertmanager["Alertmanager"]
+        grafana -->|queries alert state| alertmanager["Alertmanager"]
+        prom -->|alerts| alertmanager
     end
 
     web --> supabase["Supabase Auth / Postgres / Storage"]
     web --> openai["OpenAI Images"]
 ```
 
+*Figure 1 — Current production architecture. Public traffic reaches Caddy on
+the Azure Regular VM; application services, host/container exporters, and the
+observability stack run on the same host.*
+
 The system has commit-derived images, GitHub Actions quality gates, known-good
 deployment recovery, and private Grafana access. The AKS work did not replace
-the production VM; it created a separate operating environment for validating
+this production VM; it created a separate operating environment for validating
 managed Kubernetes delivery and failure behavior.
 
-## 2. Why AKS Was a Parallel Evidence Environment
+## 2. Why AKS Was a Parallel Learning Environment
 
 The AKS work was not a “convert Compose YAML to Kubernetes YAML” exercise.
 Local Kubernetes practice began in Minikube, where manifests, Helm behavior,
@@ -84,8 +71,8 @@ window then validated the operating model against managed Azure services: cloud
 identity, container-registry access, Gateway routing, managed node pools,
 observability, and cost-aware lifecycle decisions.
 
-Its purpose was to create inspectable evidence for a cloud-native operating
-model:
+Its purpose was to exercise a cloud-native operating model in a managed
+environment:
 
 - infrastructure can be recreated from Terraform rather than console steps;
 - CI can use short-lived cloud identity instead of a stored Azure secret;
@@ -94,21 +81,21 @@ model:
 - workload failures and planned node maintenance can be exercised in a managed
   cluster.
 
-Keeping the Regular VM in production avoided conflating this evidence work with
-a public cutover. It preserved a known-good production reference while AKS
-configuration, cluster permissions, observability components, and recovery
-playbooks were tested.
+Keeping the Regular VM in production avoided conflating this learning and
+operations work with a public cutover. It preserved a known-good production
+reference while AKS configuration, cluster permissions, observability
+components, and recovery playbooks were tested.
 
-## 3. AKS Foundation and Delivery
+## 3. AKS Infrastructure and Release Path
 
 ```mermaid
 flowchart LR
-    pr["Pull request with\ninfrastructure changes"] --> plan["Terraform OIDC plan\nreview evidence"]
+    pr["Pull request with\ninfrastructure changes"] --> plan["Terraform OIDC plan\nreview"]
     plan --> apply["Separately approved\nTerraform apply"]
     apply --> foundation["Azure foundation\nAKS · network · ACR · Key Vault\nWorkload Identity · Gateway API profile"]
 
-    dispatch["Manual AKS evidence deployment\nselected revision + explicit confirmation"] --> checks["CI quality gates\nTests, build, scans"]
-    checks --> deploy
+    dispatch["Manual AKS deployment\nselected revision + explicit confirmation"] --> checks["CI quality gates\nTests, build, scans"]
+    checks --> deploy["GitHub Actions\nAKS delivery"]
     deploy --> oidc["Azure OIDC federation"]
     oidc --> acr["Azure Container Registry"]
     oidc --> credentials["Short-lived AKS credentials"]
@@ -123,19 +110,23 @@ flowchart LR
     secrets -->|secrets for Pods| workloads
 ```
 
-### Infrastructure as code
+*Figure 2 — AKS infrastructure and release path. Terraform provisions the
+Azure platform; an explicitly confirmed GitHub Actions workflow releases the
+selected application revision into that platform.*
 
-Terraform defined the Azure foundation for the AKS evidence environment:
+### Terraform-managed foundation
+
+Terraform defined the Azure foundation for the AKS environment:
 network dependencies, AKS, Azure Container Registry, Key Vault, workload
 identity, and the Gateway API profile. Infrastructure changes began with an
 OIDC-backed Terraform plan on a pull request and proceeded only through a
 separately approved apply. State, resource names, subscription information, and
 provider configuration remain private.
 
-### CI/CD identity and release path
+### Release workflow and workload identity
 
 AKS deployment was deliberately manual: a workflow dispatch required explicit
-confirmation before it could change the evidence environment. It first ran the
+confirmation before it could change the AKS environment. It first ran the
 project quality gate, then used GitHub OIDC to sign in to Azure, built and
 locked immutable frontend and backend images in ACR, obtained short-lived AKS
 credentials, and released the selected image version through Helm. Rollout and
@@ -149,7 +140,7 @@ release became an operational problem.
 
 ```mermaid
 flowchart TD
-    subgraph cluster["AKS evidence environment"]
+    subgraph cluster["Paused AKS environment"]
         gateway["Gateway API + HTTPRoute"] --> frontendSvc["Frontend Service"]
         frontendSvc --> frontend["Next.js Deployment\n2 replicas + readiness"]
         frontend --> backendSvc["Backend Service (ClusterIP)"]
@@ -184,6 +175,10 @@ flowchart TD
     frontend --> openai["OpenAI Images"]
 ```
 
+*Figure 3 — AKS runtime topology. The Gateway routes to the frontend; the
+backend remains private, while Kubernetes workload protection and telemetry
+operate inside the paused AKS environment.*
+
 Frontend and backend ran with two replicas and readiness probes, so a
 replacement Pod had to become Ready before it could serve traffic. The backend
 remained private behind the frontend route boundary. Before the planned
@@ -207,14 +202,15 @@ components:
 Prometheus, Loki, and Tempo each use bounded persistent storage (8 Gi, 8 Gi,
 and 5 Gi respectively). Their services are `ClusterIP`; the observability
 interfaces are not presented as public endpoints. This choice limits exposure
-and cost while keeping the stack useful for an evidence environment.
+and cost while keeping the stack useful during the AKS operating window.
 
 ### Dashboard snapshot
 
 ![AKS operational signals](../assets/aks-observability-signals.png)
 
-*AKS operations dashboard showing replica availability, restarts, application
-resource use, scrape health, readiness, and autoscaling signals.*
+*Figure 4 — AKS operations dashboard. Sanitized static snapshot showing replica
+availability, restarts, application resource use, scrape health, readiness, and
+autoscaling signals.*
 
 ### Operational integration notes
 
@@ -248,17 +244,14 @@ exercises.
 | Internal alert flow | A Prometheus rule transitioned through Alertmanager and later cleared. |
 | Planned workload-node drain | A PDB-aware drain rescheduled workloads and restored the expected healthy application state. |
 
-## 7. Security and Cost Decisions
+## 7. Operating Boundaries and Current Decision
 
 | Boundary | Control / decision |
 | --- | --- |
 | Delivery identity | GitHub-to-Azure OIDC; no long-lived delivery secret is required in the workflow. |
 | Application secrets | Azure Key Vault and workload identity are used without publishing values in this repository. |
 | Network exposure | Backend and observability components are not documented as public endpoints. |
-| Portfolio safety | No source code, Terraform state, kubeconfig, raw logs, IDs, IPs, tokens, or user data are included. |
-| Cost and lifecycle | AKS was time-boxed and paused after the evidence window; the Regular VM avoids operating managed Kubernetes capacity that current product needs do not justify. |
-
-## 8. Current Operating Decision
+| Cost and lifecycle | AKS was time-boxed and paused after the AKS operating window; the Regular VM avoids operating managed Kubernetes capacity that current product needs do not justify. |
 
 SlowChrome currently runs on the Azure Regular VM. The AKS work remains
 documented as a cloud-native operations exercise, not as a pending production

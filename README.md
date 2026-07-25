@@ -20,17 +20,18 @@
 
 ## Project Highlights
 
-SlowChrome is a working motorcycle-customization MVP built with Next.js,
-FastAPI, YOLOv8, OpenAI Images, and Supabase. This repository focuses on its
-operational evolution: a practical Docker Compose deployment on Azure, local
-Kubernetes practice in Minikube, and a time-boxed AKS environment for applying
-cloud-native delivery, observability, and recovery practices to the same
-application.
+SlowChrome is a working web application for motorcycle riders to explore
+AI-assisted customization ideas, discover motorcycle styles, and learn about
+customization culture. It is built with Next.js, FastAPI, YOLOv8, OpenAI
+Images, and Supabase. This repository focuses on its operational evolution: a
+practical Docker Compose deployment on Azure, local Kubernetes practice in
+Minikube, and a time-boxed AKS environment for applying cloud-native delivery,
+observability, and recovery practices to the same application.
 
 | What I built | Why it matters | Details |
 | --- | --- | --- |
-| Terraform-managed Azure foundation | Infrastructure changes are reviewable and repeatable rather than console-only. | [Infrastructure as code](docs/technical-case-study.md#infrastructure-as-code) |
-| GitHub Actions → Azure OIDC → AKS delivery | CI can deploy immutable images without storing a long-lived Azure secret in GitHub. | [CI/CD identity and release path](docs/technical-case-study.md#cicd-identity-and-release-path) |
+| Terraform-managed Azure foundation | Infrastructure changes are reviewable and repeatable rather than console-only. | [Terraform-managed foundation](docs/technical-case-study.md#terraform-managed-foundation) |
+| GitHub Actions → Azure OIDC → AKS delivery | CI can deploy immutable images without storing a long-lived Azure secret in GitHub. | [Release workflow and workload identity](docs/technical-case-study.md#release-workflow-and-workload-identity) |
 | Helm-managed frontend and private backend | The application is deployed as Kubernetes workloads with explicit rollout and rollback behavior. | [AKS topology](docs/technical-case-study.md#4-aks-runtime-topology) |
 | Metrics, logs, traces, dashboards, and alerts | Diagnosis is based on correlated operational signals instead of SSH-only debugging. | [Observability](docs/technical-case-study.md#5-kubernetes-observability) |
 | Recovery and resilience drills | A bad configuration, Pod loss, internal alert flow, and planned node maintenance were exercised in a managed cluster. | [Recovery evidence](docs/technical-case-study.md#6-recovery-and-resilience-drills) |
