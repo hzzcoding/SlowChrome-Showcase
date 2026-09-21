@@ -1,32 +1,16 @@
-# SlowChrome: Incident-First Operations from a Regular VM to AKS Evidence
+# SlowChrome Observability and Reliability Engineering Case Study
 
-This case study documents how SlowChrome, an AI-assisted motorcycle
-customization application, is operated and diagnosed. It is deliberately
-evidence-led: capabilities are presented as implemented only when they have a
-corresponding configuration, automated contract, live signal, drill record, or
-sanitized artifact.
+This case study explains how SlowChrome is monitored, diagnosed, and operated.
+It expands on the [portfolio overview](../README.md) with the signal flow,
+dashboard design, alert and SLO semantics, automated checks, and Kubernetes
+work completed for the project.
 
-Read the [portfolio overview](../README.md) for the recruiter-facing version.
+> **Current scope:** the public application runs on an Azure Regular VM. The
+> AKS environment described later was used for a time-boxed implementation and
+> recovery exercise and is now stopped. SLI rules are implemented, but a
+> completed 99.9% SLO observation window is not claimed.
 
-> **Scope boundary:** the current production origin is an Azure Regular VM. A
-> separate AKS environment was deployed and exercised as a time-boxed
-> cloud-native evidence path and is now stopped. This is not a claim that public
-> DNS was cut over to AKS, that AKS served sustained production traffic, or that
-> a complete 99.9% SLO observation window has been accepted.
-
-## Executive Summary
-
-| Area | Evidence | Status |
-| --- | --- | --- |
-| Production runtime | Next.js, private FastAPI/YOLOv8, and the complete Compose observability stack on an Azure Regular VM | Active |
-| Incident response | A default Incident Overview with time-preserving drill-downs into HTTP, dependencies, infrastructure, logs, and SLOs | Implemented and captured |
-| Service telemetry | Public probes, HTTP RED signals, AI render outcomes/latency/concurrency, Supabase/OpenAI calls, and Garage persistence stages | Implemented and queryable |
-| Alerting | Prometheus rules with severity, duration, event-count, and ratio controls routed through Alertmanager | Implemented; external delivery is conditional |
-| Reliability | 14-day availability and AI success/latency recording rules with a minimum sample gate | Implemented; compliance not claimed |
-| Observability quality | Versioned dashboard JSON, stable UID tests, link/query contracts, and Prometheus rule tests | Automated |
-| Cloud-native path | Terraform foundation, GitHub OIDC, Helm workloads, Kubernetes telemetry, and measured recovery exercises | Implemented and exercised; AKS stopped |
-
-## 1. Current Production Architecture
+## 1. Operating Context
 
 SlowChrome lets a user upload a motorcycle image, validate whether the image is
 suitable, configure a future build, request a bounded AI render, and save
@@ -45,15 +29,14 @@ Collector, Alertmanager, node-exporter, and cAdvisor. Operations interfaces are
 loopback-only and reached through authenticated operator access; they are not
 public administration endpoints.
 
-## 2. From Monitoring Components to an Operating Model
+## 2. Incident-First Operating Model
 
 The first observability iteration answered individual technical questions:
 backend traffic, host saturation, container logs, traces, and active alerts.
 However, several equally weighted dashboards forced an operator to decide where
 to start before knowing which user journey was affected.
 
-The redesign changed the information architecture rather than merely adding
-panels:
+The dashboards are organized around the following incident-response workflow:
 
 1. Grafana opens on **SlowChrome Incident Overview**.
 2. The first row describes user-visible capabilities and critical telemetry
@@ -69,20 +52,6 @@ The dashboards deliberately distinguish `IDLE` from `UNKNOWN`. No recent
 Supabase, OpenAI, or Garage traffic is not evidence of success, but it also is
 not a datasource failure. This avoids turning normal low traffic into false
 incidents.
-
-### Why AKS remained parallel
-
-SlowChrome was built first as a working product, not as an infrastructure
-exercise. Local Kubernetes practice in Minikube established the manifests and
-Helm behavior before a time-boxed AKS window validated cloud identity,
-container-registry access, managed node pools, Gateway routing, Kubernetes
-observability, and controlled failures.
-
-Keeping the Regular VM in production separated learning and evidence work from
-a public migration. AKS supplied stronger orchestration and failure-domain
-evidence, but its ongoing cost and operational complexity are not justified by
-the product's current traffic. The cluster is therefore stopped, not presented
-as a pending production cutover.
 
 ## 3. Signal Architecture
 
@@ -322,72 +291,26 @@ These tests do not prove that every production dependency is healthy. They prove
 that dashboard changes preserve the operator contract and that rule semantics
 are reproducible before deployment.
 
-## 9. Measured AKS Recovery Evidence
+## 9. AKS Implementation and Recovery
 
-The AKS phase added a separate operational control plane and failure modes that
-the single VM could not demonstrate.
+I deployed SlowChrome and its observability stack end to end on AKS after first
+practicing the Kubernetes workflow locally with Minikube. The managed cluster
+was used to validate the cloud delivery path, Kubernetes telemetry, and
+controlled recovery behavior without moving public traffic away from the
+Regular VM.
 
-### Infrastructure and release path
+| Area | Implementation |
+| --- | --- |
+| Infrastructure | Terraform managed the network, AKS, ACR, Key Vault, Workload Identity, and Gateway API foundation. Plans were reviewed before separately approved applies. |
+| Delivery | GitHub Actions authenticated through Azure OIDC, used immutable ACR images, and released through Helm with readiness, rollout, and smoke checks. |
+| Workloads | Next.js and private FastAPI ran as two-replica Deployments with readiness probes and PodDisruptionBudgets. |
+| Observability | Prometheus, Grafana, Loki, Tempo, Alloy, OpenTelemetry Collector, Alertmanager, kube-state-metrics, and node-exporter ran behind private `ClusterIP` services. |
 
-```mermaid
-flowchart LR
-    pr["Infrastructure pull request"] --> plan["OIDC Terraform plan"]
-    plan --> approval["Separate apply approval"]
-    approval --> foundation["Network · AKS · ACR · Key Vault\nWorkload Identity · Gateway API"]
-
-    dispatch["Confirmed deployment workflow"] --> checks["Tests · build · scans"]
-    checks --> oidc["Azure OIDC"]
-    oidc --> images["Immutable ACR images"]
-    oidc --> credentials["Short-lived AKS credentials"]
-    images --> helm["Helm release"]
-    credentials --> helm
-    foundation --> workloads["AKS workloads"]
-    helm --> workloads
-```
-
-Terraform defined the Azure dependency chain, while plans were reviewed before
-separately approved applies. The AKS release workflow was deliberately manual:
-an explicit confirmation selected the revision before CI authenticated with
-short-lived Azure OIDC, built or reused immutable images, obtained cluster
-credentials, and released through Helm. Namespace-scoped permissions, a CRD
-preflight, readiness, rollout, and smoke checks bounded the deployment path.
-
-### Runtime topology
-
-```mermaid
-flowchart TD
-    subgraph aks["Stopped AKS evidence environment"]
-        gateway["Gateway API + HTTPRoute"] --> frontend["Next.js Deployment\n2 replicas + readiness"]
-        frontend --> backend["Private FastAPI Deployment\n2 replicas + readiness"]
-        frontendPdb["Frontend PDB"] -. protects .-> frontend
-        backendPdb["Backend PDB"] -. protects .-> backend
-
-        prom["Prometheus"] --> grafana["Grafana"]
-        frontend --> alloy["Alloy DaemonSet"]
-        backend --> alloy
-        alloy --> loki["Loki"]
-        backend --> collector["OTel Collector"]
-        collector --> tempo["Tempo"]
-        prom --> alertmanager["Alertmanager"]
-    end
-```
-
-Frontend and backend ran with two replicas and readiness probes. The backend
-remained private behind the frontend route boundary. PodDisruptionBudgets were
-verified before planned maintenance so a voluntary disruption could not evict
-both replicas together.
-
-The Kubernetes observability stack included Prometheus, Grafana, Loki, Tempo,
-Alloy, OpenTelemetry Collector, Alertmanager, kube-state-metrics, and
-node-exporter. Services were `ClusterIP` and accessed privately.
+The observability components used the same operational model as the VM stack:
+service-level metrics for detection, focused dashboards for diagnosis, and logs
+or traces for additional context.
 
 ![AKS Kubernetes operations dashboard](../assets/aks-observability-signals.png)
-
-Prometheus discovery selectors had to match the labels emitted by the Helm
-chart; OpenTelemetry and Loki needed explicit integration contracts; and
-non-root Alloy required writable state plus a ConfigMap checksum so
-configuration changes triggered rollout. These details turned installed
-components into discoverable, queryable telemetry.
 
 ### Recovery results
 
@@ -399,13 +322,10 @@ components into discoverable, queryable telemetry.
 | Internal alert pipeline | 41 s | 345 s clear | A rule transitioned through Alertmanager and resolved; no external receiver is claimed. |
 | Workload-node drain | — | 15 s drain; 28 s controlled recovery | PDB-guarded planned maintenance rescheduled workloads. This is not incident MTTD/MTTR. |
 
-In the recorded node-drain timeline, the drain began at `03:25:24Z`, completed
-at `03:25:39Z`, and workload recovery was verified at `03:25:52Z`. Frontend and
-backend replicas were 2/2 Ready afterward, observability components were Ready,
-and no workload node remained cordoned.
-
-The AKS environment is now stopped. Restarting it is a cost and lifecycle
-decision, not a casual step required to view this portfolio.
+The cluster was stopped after the exercise because its ongoing cost and
+operational overhead were not justified by the project's current traffic. I
+continue practicing the workflow locally with Minikube while retaining these
+deployment and recovery results.
 
 ## 10. Security, Privacy, and Cost Boundaries
 
@@ -415,9 +335,9 @@ decision, not a casual step required to view this portfolio.
 | Application secrets | Cloud secret storage and workload identity are used without publishing values here. |
 | Network exposure | The private backend and observability administration surfaces are not public endpoints. |
 | Portfolio evidence | Screenshots exclude credentials, user data, cloud IDs, and public infrastructure addresses; the Logs screenshot intentionally contains no raw lines. |
-| Cost control | The production VM is the cost-aware current runtime; the AKS evidence environment is stopped pending an explicit lifecycle decision. |
+| Cost control | The production VM remains proportionate to current traffic; the AKS environment is stopped. |
 
-## 11. What Is Not Yet Claimed
+## 11. Current Limitations
 
 The following remain gaps or separate decisions:
 
@@ -425,23 +345,6 @@ The following remain gaps or separate decisions:
 2. continuously exercised email, Slack, or PagerDuty delivery;
 3. a completed Supabase backup/restore drill;
 4. multi-region availability;
-5. AKS public DNS/TLS cutover and sustained production traffic;
+5. AKS public DNS/TLS cutover or sustained production traffic;
 6. shared render concurrency state suitable for honest multi-replica frontend
-   scaling; and
-7. an approved AKS teardown and retained-resource decision.
-
-## 12. Interview Discussion Guide
-
-- Walk through the first five minutes of an OpenAI or Supabase incident without
-  starting from raw logs.
-- Explain why a low-traffic service needs both minimum event counts and failure
-  ratios in alert rules.
-- Distinguish an intentionally idle dependency path from a broken telemetry
-  datasource.
-- Describe how stable dashboard UIDs, deployment annotations, and preserved time
-  ranges reduce diagnostic friction.
-- Explain why an implemented SLI is not yet evidence of SLO attainment.
-- Contrast Pod self-healing, failed-rollout recovery, and PDB-controlled node
-  maintenance.
-- Discuss when the operational and financial complexity of permanent AKS is
-  justified over a well-understood VM.
+   scaling.
